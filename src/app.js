@@ -6,6 +6,8 @@
  * directory, the CLI passes the ones from config.json.
  */
 import { execFile } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 import { dataPaths, ensureDirs, loadConfig, resolveProxy, saveConfig } from './config.js';
 import { openDatabase, getCache, setCache, lastScanRun, listSeries } from './db/repo.js';
 import { BangumiClient } from './meta/bangumi.js';
@@ -96,6 +98,7 @@ export async function startLibraryApp(options = {}) {
   ensureDirs();
   const config = loadConfig();
   config.coversDir = paths.coversDir;
+  config.dataDir = paths.dataDir;
 
   const db = openDatabase(paths.dbPath);
 
@@ -121,7 +124,17 @@ export async function startLibraryApp(options = {}) {
 
   const scanController = createScanController({ db, config, client, coversDir: paths.coversDir, logger });
   const { routes } = createRoutes({ db, client, config, saveConfig, scanController });
-  const server = createServer({ routes, publicDir: paths.publicDir, coversDir: paths.coversDir });
+  const server = createServer({
+    routes,
+    publicDir: paths.publicDir,
+    coversDir: paths.coversDir,
+    backgroundProvider: () => {
+      const name = config.appearance?.background;
+      if (!name) return null;
+      const file = path.join(paths.dataDir, name);
+      return fs.existsSync(file) ? file : null;
+    },
+  });
 
   await new Promise((resolve, reject) => {
     server.once('error', reject);

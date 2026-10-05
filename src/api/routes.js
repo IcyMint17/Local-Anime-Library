@@ -454,6 +454,80 @@ export function createRoutes({
 
   /* ------------------------------------------------------------- settings */
 
+  add('GET', '/api/appearance', () => {
+    const appearance = config.appearance ?? {};
+    const file = appearance.background && config.dataDir ? path.join(config.dataDir, appearance.background) : null;
+    const hasImage = Boolean(file) && fs.existsSync(file);
+    return {
+      hasImage,
+      // The stored file name never changes, so bust the cache with its mtime.
+      url: hasImage ? `/background?v=${Math.round(fs.statSync(file).mtimeMs)}` : null,
+      blur: Number(appearance.blur ?? 0),
+      brightness: Number(appearance.brightness ?? 1),
+    };
+  });
+
+  add('POST', '/api/appearance', (_params, body) => {
+    const appearance = { ...(config.appearance ?? {}) };
+    const BACKGROUND_NAMES = ['background.jpg', 'background.png', 'background.webp', 'background.gif'];
+
+    if (body.clear) {
+      for (const name of BACKGROUND_NAMES) {
+        const stale = path.join(config.dataDir, name);
+        if (fs.existsSync(stale)) {
+          try {
+            fs.rmSync(stale, { force: true });
+          } catch {
+            /* a locked file is fine — clearing the setting is what matters */
+          }
+        }
+      }
+      appearance.background = null;
+    } else if (typeof body.image === 'string') {
+      const match = /^data:image\/([a-z0-9+.-]+);base64,(.+)$/i.exec(body.image);
+      if (!match) return { status: 400, body: { error: '只接受 data:image/... 形式的图片' } };
+      const extension = match[1].toLowerCase() === 'jpeg' ? 'jpg' : match[1].replace(/[^a-z0-9]/gi, '');
+      const buffer = Buffer.from(match[2], 'base64');
+      if (buffer.length === 0) return { status: 400, body: { error: '图片内容为空' } };
+      if (buffer.length > 16 * 1024 * 1024) {
+        return { status: 400, body: { error: '图片过大（上限 16 MB）' } };
+      }
+
+      const target = `background.${extension}`;
+      for (const name of BACKGROUND_NAMES) {
+        if (name === target) continue;
+        const stale = path.join(config.dataDir, name);
+        if (fs.existsSync(stale)) {
+          try {
+            fs.rmSync(stale, { force: true });
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+      fs.writeFileSync(path.join(config.dataDir, target), buffer);
+      appearance.background = target;
+    }
+
+    if (Number.isFinite(Number(body.blur))) appearance.blur = Math.max(0, Math.min(40, Number(body.blur)));
+    if (Number.isFinite(Number(body.brightness))) {
+      appearance.brightness = Math.max(0.2, Math.min(2, Number(body.brightness)));
+    }
+
+    config.appearance = appearance;
+    saveConfig({ appearance });
+
+    const file = appearance.background ? path.join(config.dataDir, appearance.background) : null;
+    const hasImage = Boolean(file) && fs.existsSync(file);
+    return {
+      ok: true,
+      hasImage,
+      url: hasImage ? `/background?v=${Math.round(fs.statSync(file).mtimeMs)}` : null,
+      blur: appearance.blur ?? 0,
+      brightness: appearance.brightness ?? 1,
+    };
+  });
+
   add('GET', '/api/settings', () => ({
     scanDirs: config.scan.dirs,
     proxy: config.proxy,

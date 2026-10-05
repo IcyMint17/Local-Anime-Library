@@ -71,6 +71,12 @@ export const DEFAULT_CONFIG = {
   // 'auto' = detect, '' = never use a proxy, otherwise an explicit http://host:port
   proxy: 'auto',
   resolvedProxy: null,
+  appearance: {
+    // File name inside the data directory, or null when no background is set.
+    background: null,
+    blur: 0,
+    brightness: 1,
+  },
 };
 
 function deepMerge(base, override) {

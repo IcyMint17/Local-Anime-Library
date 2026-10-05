@@ -12,6 +12,7 @@ const state = {
   detail: null,
   detailTab: 'episodes',
   detailGroups: null,
+  appearance: { hasImage: false, url: null, blur: 0, brightness: 1 },
   pendingCandidate: null,
 };
 
@@ -140,6 +141,56 @@ function applyMode(mode) {
     button.title = next === 'dark' ? '切换到亮色' : '切换到深色';
   }
   return next;
+}
+
+/* ------------------------------------------------------ custom background */
+
+function applyAppearance(appearance) {
+  const { hasImage = false, url = null, blur = 0, brightness = 1 } = appearance ?? {};
+  const root = document.documentElement;
+  const show = Boolean(hasImage) && Boolean(url);
+  root.classList.toggle('has-background', show);
+  root.style.setProperty('--bg-blur', `${Number(blur) || 0}px`);
+  root.style.setProperty('--bg-brightness', String(Number(brightness) || 1));
+  if (show) root.style.setProperty('--bg-image', `url("${url}")`);
+  else root.style.removeProperty('--bg-image');
+  state.appearance = { hasImage: show, url, blur: Number(blur) || 0, brightness: Number(brightness) || 1 };
+}
+
+/** Reads a picked file, shrinking it so a 20 MP photo does not become a huge payload. */
+async function prepareBackgroundImage(file) {
+  const dataUrl = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error('读取文件失败'));
+    reader.readAsDataURL(file);
+  });
+
+  const image = await new Promise((resolve, reject) => {
+    const probe = new Image();
+    probe.onload = () => resolve(probe);
+    probe.onerror = () => reject(new Error('这不是有效的图片文件'));
+    probe.src = dataUrl;
+  });
+
+  const MAX = 2560;
+  const scale = Math.min(1, MAX / Math.max(image.width, image.height));
+  const smallEnough = dataUrl.length < 3.2 * 1024 * 1024;
+  if (scale === 1 && smallEnough) return dataUrl;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(image.width * scale));
+  canvas.height = Math.max(1, Math.round(image.height * scale));
+  canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/jpeg', 0.86);
+}
+
+async function loadAppearance() {
+  try {
+    applyAppearance(await api('/api/appearance'));
+  } catch {
+    /* an unset background is not an error */
+  }
 }
 
 function currentMode() {
@@ -871,6 +922,29 @@ async function openSettings() {
          <div class="field-hint">只影响按钮、进度条、选中态等强调色，保存在本机浏览器里。</div>
        </div>
        <div class="field">
+         <label>背景图片</label>
+         <div class="bg-row">
+           <button class="btn btn-small btn-ghost" id="btnPickBg">选择图片…</button>
+           <button class="btn btn-small btn-ghost" id="btnClearBg">清除背景</button>
+           <input type="file" id="bgFile" accept="image/*" hidden />
+         </div>
+         <div class="field-hint" id="bgHint"></div>
+       </div>
+       <div class="field">
+         <label for="bgBlur">背景模糊</label>
+         <div class="range-row">
+           <input type="range" id="bgBlur" min="0" max="30" step="1" />
+           <span class="range-value" id="bgBlurValue"></span>
+         </div>
+       </div>
+       <div class="field">
+         <label for="bgBright">背景亮度</label>
+         <div class="range-row">
+           <input type="range" id="bgBright" min="30" max="150" step="1" />
+           <span class="range-value" id="bgBrightValue"></span>
+         </div>
+       </div>
+       <div class="field">
          <label for="setDirs">扫描目录（每行一个）</label>
          <textarea id="setDirs">${escapeHtml((settings.scanDirs ?? []).join('\n'))}</textarea>
          <div class="field-hint">程序只读扫描，不会移动、重命名或删除任何文件。</div>
@@ -939,6 +1013,69 @@ async function openSettings() {
     markActiveTheme();
   });
   markActiveTheme();
+
+  /* ---- background image ---- */
+  const blurInput = $('bgBlur');
+  const brightInput = $('bgBright');
+  const bgHint = $('bgHint');
+
+  const syncBackgroundUi = () => {
+    const { hasImage, blur, brightness } = state.appearance;
+    blurInput.value = String(blur);
+    brightInput.value = String(Math.round(brightness * 100));
+    $('bgBlurValue').textContent = `${blur} px`;
+    $('bgBrightValue').textContent = `${Math.round(brightness * 100)}%`;
+    bgHint.textContent = hasImage
+      ? '已设置背景图。拖动滑块实时预览，松开后保存。'
+      : '选一张图片作为页面背景，可以调模糊和亮度。图片存在本地数据目录，不会上传到别处。';
+    $('btnClearBg').disabled = !hasImage;
+  };
+  syncBackgroundUi();
+
+  const saveBackground = async (patch, { quiet = false } = {}) => {
+    try {
+      const result = await api('/api/appearance', { method: 'POST', body: patch });
+      applyAppearance(result);
+      syncBackgroundUi();
+      if (!quiet) toast('背景已更新');
+    } catch (error) {
+      toast(`背景设置失败：${error.message}`, true);
+      syncBackgroundUi();
+    }
+  };
+
+  $('btnPickBg').addEventListener('click', () => $('bgFile').click());
+  $('bgFile').addEventListener('change', async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    bgHint.textContent = '正在处理图片…';
+    try {
+      await saveBackground({ image: await prepareBackgroundImage(file) });
+    } catch (error) {
+      toast(error.message, true);
+      syncBackgroundUi();
+    } finally {
+      event.target.value = '';
+    }
+  });
+  $('btnClearBg').addEventListener('click', () => saveBackground({ clear: true }));
+
+  // Drag for a live preview, persist when the slider is released.
+  for (const [input, key] of [
+    [blurInput, 'blur'],
+    [brightInput, 'brightness'],
+  ]) {
+    input.addEventListener('input', () => {
+      const value = key === 'blur' ? Number(input.value) : Number(input.value) / 100;
+      applyAppearance({ ...state.appearance, [key]: value });
+      $('bgBlurValue').textContent = `${Number(blurInput.value)} px`;
+      $('bgBrightValue').textContent = `${Number(brightInput.value)}%`;
+    });
+    input.addEventListener('change', () => {
+      const value = key === 'blur' ? Number(input.value) : Number(input.value) / 100;
+      saveBackground({ [key]: value }, { quiet: true });
+    });
+  }
 }
 
 /* ------------------------------------------------------------------ scan */
@@ -1086,9 +1223,10 @@ document.addEventListener('click', async (event) => {
       state.detail.series.progress = result.progress;
       const series = state.items.find((item) => item.id === state.detail.series.id);
       if (series) series.progress = result.progress;
-      renderCounts();
-      renderGrid();
       updateProgressUi();
+      // 继续观看 is derived from the watch marks, so it has to be refetched —
+      // otherwise the strip keeps showing the episode that was just ticked off.
+      await loadLibrary();
     } catch (error) {
       row.classList.toggle('is-watched', !watched);
       toast(`保存失败：${error.message}`, true);
@@ -1205,6 +1343,7 @@ applyTheme(currentTheme());
 applyMode(currentMode());
 setCollapsed(readStore(STORE.collapsed) === '1');
 renderNav();
+loadAppearance();
 
 loadLibrary()
   .then(() => pollScan())

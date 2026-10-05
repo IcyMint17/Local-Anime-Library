@@ -83,7 +83,7 @@ function resolveInside(root, relative) {
   return target;
 }
 
-export function createServer({ routes, publicDir, coversDir, logger = console }) {
+export function createServer({ routes, publicDir, coversDir, backgroundProvider = null, logger = console }) {
   return http.createServer(async (req, res) => {
     const requestUrl = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
     const pathname = decodeURIComponent(requestUrl.pathname);
@@ -110,6 +110,13 @@ export function createServer({ routes, publicDir, coversDir, logger = console })
       if (file && sendFile(res, file)) return undefined;
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
       return res.end('封面不存在');
+    }
+
+    if (pathname === '/background') {
+      const backgroundFile = backgroundProvider ? backgroundProvider() : null;
+      if (backgroundFile && sendFile(res, backgroundFile)) return undefined;
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end('没有设置背景图');
     }
 
     const relative = pathname === '/' ? 'index.html' : pathname.slice(1);
