@@ -10,10 +10,45 @@
     "start": "electron .",
     "make-icon": "electron make-icon.mjs",
     "stage": "node stage.mjs",
-    "pack": "node stage.mjs && electron-packager staging AnimeLibrary --platform=win32 --arch=x64 --out=dist --overwrite --asar --icon=icon.ico --app-version=0.1.0 --app-copyright=\"本地番剧媒体库\" --win32metadata.CompanyName=\"本地番剧媒体库\" --win32metadata.FileDescription=\"本地番剧媒体库\""
+    "pack": "node stage.mjs && electron-packager staging AnimeLibrary --platform=win32 --arch=x64 --out=dist --overwrite --asar --icon=icon.ico --app-version=0.1.0 --app-copyright=\"本地番剧媒体库\" --win32metadata.CompanyName=\"本地番剧媒体库\" --win32metadata.FileDescription=\"本地番剧媒体库\"",
+    "installer": "npm run pack && electron-builder --prepackaged dist/AnimeLibrary-win32-x64 --win nsis"
   },
   "devDependencies": {
     "@electron/packager": "^20.3.0",
-    "electron": "^44.5.1"
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "local.anime.library",
+    "productName": "AnimeLibrary",
+    "copyright": "本地番剧媒体库",
+    "directories": {
+      "output": "installer"
+    },
+    "win": {
+      "icon": "icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "本地番剧媒体库-安装包-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "本地番剧媒体库",
+      "installerIcon": "icon.ico",
+      "uninstallerIcon": "icon.ico",
+      "installerHeaderIcon": "icon.ico",
+      "deleteAppDataOnUninstall": false,
+      "language": "2052",
+      "runAfterFinish": true
+    }
   }
 }
