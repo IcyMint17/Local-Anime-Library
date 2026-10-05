@@ -1,0 +1,15 @@
+{
+  "name": "anime-library",
+  "version": "0.1.0",
+  "private": true,
+  "description": "本地番剧媒体库管理器 — 扫描硬盘、自动识别番剧、生成可视化番剧库",
+  "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "start": "node src/main.js",
+    "scan": "node src/main.js --scan",
+    "test": "node --test test/"
+  }
+}

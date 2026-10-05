@@ -1,0 +1,11 @@
+# Normalise line endings in the repository, but keep the Windows launcher as
+# CRLF — cmd.exe mis-parses LF-only batch files, and `goto :label` breaks.
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary-ish assets that should never be line-ending converted.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
