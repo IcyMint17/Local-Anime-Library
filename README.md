@@ -135,9 +135,36 @@ test/                 node:test 测试，全部使用真实文件名
 
 ## 尚未包含
 
-- 桌面应用外壳（Electron / Tauri）
 - 目录实时监控，自动发现新番
 - 把一个文件夹自动拆成多个 Bangumi 条目（跨季 / 跨部分）
 - 内置播放器、播放进度回传
+
+## 桌面版（Electron）
+
+浏览器版和桌面版共用同一套后端代码（`src/app.js` 的 `startLibraryApp()`），
+桌面外壳只是换了个加载方式，没有第二份实现。
+
+```
+cd desktop
+npm install          # 首次需要，从镜像下载 Electron 二进制
+npm run make-icon    # 由 public/icon.jpg 生成 icon.ico
+npm start            # 开发模式运行
+npm run pack         # 打包到 desktop/dist/AnimeLibrary-win32-x64
+```
+
+打包脚本会先把 `src/`、`public/`、`config.json` 和外壳文件整理进 `staging/`，
+再交给 electron-packager 打成 `app.asar`。
+
+| | 浏览器版 | 桌面版 |
+| --- | --- | --- |
+| 代码位置 | 项目目录 | `resources/app.asar`（只读） |
+| 数据目录 | `<项目>/data` | `%APPDATA%\AnimeLibrary\library` |
+| 设置文件 | `<项目>/config.json` | 同数据目录下 |
+| 端口 | 5178（可在设置里改） | 每次启动由系统分配 |
+
+桌面版的启动日志写在 `%APPDATA%\AnimeLibrary\startup.log`——窗口应用没有控制台，
+启动失败时先看它。菜单「帮助 → 打开数据文件夹」可以直接定位库文件。
+
+> 桌面版使用独立的数据目录，所以第一次启动会重新扫描一遍；这不影响命令行版的库。
 
 设计文档见 `docs/superpowers/specs/2026-10-05-anime-library-design.md`。
