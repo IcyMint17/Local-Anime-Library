@@ -6,20 +6,33 @@ import path from 'node:path';
 import { isVideoFile } from './parse.js';
 
 /**
+ * Hands control back to the event loop.
+ *
+ * The scan used to run entirely synchronously, which froze the HTTP server for
+ * the whole file walk — status requests could not be answered, so the UI never
+ * saw "扫描中" and the POST itself blocked for seconds. Yielding every so often
+ * keeps the server responsive while it works.
+ */
+const breathe = () => new Promise((resolve) => setImmediate(resolve));
+
+/**
  * Walks `root` and returns every video file found.
  *
- * @returns {{files:Array<object>, skippedFiles:number, errors:Array<{path:string,message:string}>}}
+ * @returns {Promise<{files:Array<object>, skippedFiles:number, errors:Array<{path:string,message:string}>}>}
  */
-export function walkVideos(root, options = {}) {
+export async function walkVideos(root, options = {}) {
   const { ignoreDirNames = [], maxDepth = 12 } = options;
   const ignore = new Set(ignoreDirNames.map((name) => name.toLowerCase()));
   const files = [];
   const errors = [];
   let skippedFiles = 0;
+  let visited = 0;
 
   const stack = [{ dir: root, depth: 0, segments: [] }];
   while (stack.length > 0) {
     const { dir, depth, segments } = stack.pop();
+    visited += 1;
+    if (visited % 25 === 0) await breathe();
     let entries;
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -69,7 +82,7 @@ export function walkVideos(root, options = {}) {
 }
 
 /** Counts directories that contain no video at all — reported but not imported. */
-export function findEmptySeriesFolders(root) {
+export async function findEmptySeriesFolders(root) {
   const empty = [];
   let entries;
   try {
@@ -79,7 +92,7 @@ export function findEmptySeriesFolders(root) {
   }
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
-    const result = walkVideos(path.join(root, entry.name));
+    const result = await walkVideos(path.join(root, entry.name));
     if (result.files.length === 0) empty.push(entry.name);
   }
   return empty;

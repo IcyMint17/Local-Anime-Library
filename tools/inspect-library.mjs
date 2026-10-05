@@ -7,7 +7,7 @@ import { walkVideos } from '../src/scan/walk.js';
 import { groupFiles } from '../src/scan/group.js';
 
 const root = process.argv[2] ?? 'E:\\Videos\\Anime';
-const { files, skippedFiles, errors } = walkVideos(root);
+const { files, skippedFiles, errors } = await walkVideos(root);
 const groups = groupFiles(files, { rootName: root.split(/[\\/]/).pop() });
 
 console.log(`根目录: ${root}`);

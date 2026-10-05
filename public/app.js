@@ -954,6 +954,17 @@ async function startScan() {
 }
 
 let pollTimer = null;
+let scanTicks = 0;
+
+/**
+ * Watches the scan state continuously.
+ *
+ * The first version only kept polling while *this tab* believed a scan was
+ * running, so a scan started anywhere else — the CLI, a second window, or the
+ * automatic first-run scan before the page finished loading — never showed up.
+ * A slow heartbeat when idle fixes that, and the fast poll while running keeps
+ * the progress bar smooth.
+ */
 function pollScan() {
   clearTimeout(pollTimer);
   const tick = async () => {
@@ -965,13 +976,23 @@ function pollScan() {
       return;
     }
     const wasRunning = state.scan.running;
+    const previousFinish = state.scan.last?.finishedAt ?? null;
     state.scan = status;
     renderScanStatus();
+
     if (status.running) {
+      scanTicks += 1;
+      // Let the poster wall fill in as the scan walks the library.
+      if (scanTicks % 5 === 0) await loadLibrary().catch(() => {});
       pollTimer = setTimeout(tick, 1200);
       return;
     }
-    if (wasRunning) {
+
+    // A short scan can start and finish between two heartbeats, so completion is
+    // detected from the run timestamp rather than from having seen it running.
+    const finished = Boolean(status.last?.finishedAt) && status.last.finishedAt !== previousFinish;
+    if (wasRunning || finished) {
+      scanTicks = 0;
       await loadLibrary();
       if (status.last) {
         toast(
@@ -979,6 +1000,9 @@ function pollScan() {
         );
       }
     }
+    // Idle heartbeat. A warm-cache scan only takes ~2s, so this has to be
+    // shorter than that or the whole scan could fall between two polls.
+    pollTimer = setTimeout(tick, 1000);
   };
   tick();
 }
@@ -1147,6 +1171,13 @@ $('navList').addEventListener('click', (event) => {
 
 $('btnCollapse').addEventListener('click', () => setCollapsed(!isCollapsed()));
 $('btnMode').addEventListener('click', () => applyMode(currentMode() === 'dark' ? 'light' : 'dark'));
+
+// Coming back to the window should show the current state immediately instead
+// of waiting for the next heartbeat.
+window.addEventListener('focus', () => pollScan());
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) pollScan();
+});
 
 let searchDebounce = null;
 $('search').addEventListener('input', (event) => {

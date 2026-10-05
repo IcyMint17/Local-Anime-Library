@@ -101,8 +101,8 @@ test('group: files in an extra sub-folder become specials, not episodes', () => 
 test(
   'integration: grouping the real E:\\Videos\\Anime library',
   { skip: hasLibrary ? false : 'E:\\Videos\\Anime not present' },
-  () => {
-    const { files, errors } = walkVideos(LIBRARY);
+  async () => {
+    const { files, errors } = await walkVideos(LIBRARY);
     assert.equal(errors.length, 0, `walk errors: ${JSON.stringify(errors)}`);
     assert.ok(files.length > 300, `expected 300+ videos, got ${files.length}`);
 

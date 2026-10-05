@@ -17,6 +17,32 @@ export const DB_PATH = path.join(DATA_DIR, 'library.db');
 export const CONFIG_PATH = path.join(ROOT, 'config.json');
 export const PUBLIC_DIR = path.join(ROOT, 'public');
 
+/**
+ * Where the app keeps its files *right now*.
+ *
+ * The desktop build ships the code read-only inside the app bundle, so the
+ * database and covers have to live in the user's profile instead. The Electron
+ * entry point sets these environment variables before starting the server:
+ *   ANIME_LIBRARY_ROOT — where `public/` and `config.json` live
+ *   ANIME_LIBRARY_DATA — where `library.db` and `covers/` live
+ */
+export function dataPaths() {
+  const root = process.env.ANIME_LIBRARY_ROOT ? path.resolve(process.env.ANIME_LIBRARY_ROOT) : ROOT;
+  const dir = process.env.ANIME_LIBRARY_DATA ? path.resolve(process.env.ANIME_LIBRARY_DATA) : path.join(root, 'data');
+  return {
+    root,
+    dataDir: dir,
+    coversDir: path.join(dir, 'covers'),
+    dbPath: path.join(dir, 'library.db'),
+    // The desktop build ships the code inside a read-only archive, so its
+    // settings have to live next to the database.
+    configPath: process.env.ANIME_LIBRARY_CONFIG
+      ? path.resolve(process.env.ANIME_LIBRARY_CONFIG)
+      : path.join(root, 'config.json'),
+    publicDir: path.join(root, 'public'),
+  };
+}
+
 /** Local proxy ports commonly used by Clash / V2Ray / Surge style clients. */
 export const COMMON_PROXY_PORTS = [7892, 7890, 7891, 10809, 10808, 2080, 1080, 8888, 8080, 20171];
 
@@ -61,16 +87,18 @@ function deepMerge(base, override) {
 }
 
 export function ensureDirs() {
-  for (const dir of [DATA_DIR, COVERS_DIR]) {
+  const paths = dataPaths();
+  for (const dir of [paths.dataDir, paths.coversDir]) {
     fs.mkdirSync(dir, { recursive: true });
   }
 }
 
 export function loadConfig() {
+  const { configPath } = dataPaths();
   let stored = {};
-  if (fs.existsSync(CONFIG_PATH)) {
+  if (fs.existsSync(configPath)) {
     try {
-      stored = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+      stored = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     } catch (error) {
       console.warn(`配置文件解析失败，使用默认配置: ${error.message}`);
       stored = {};
@@ -80,8 +108,14 @@ export function loadConfig() {
 }
 
 export function saveConfig(config) {
+  const { configPath } = dataPaths();
   const serialisable = pickKnownConfig(DEFAULT_CONFIG, deepMerge(DEFAULT_CONFIG, config));
-  fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(serialisable, null, 2)}\n`, 'utf8');
+  try {
+    fs.writeFileSync(configPath, `${JSON.stringify(serialisable, null, 2)}\n`, 'utf8');
+  } catch (error) {
+    // A read-only install location must not take the whole app down.
+    console.warn(`配置写入失败（${configPath}）: ${error.message}`);
+  }
   return serialisable;
 }
 

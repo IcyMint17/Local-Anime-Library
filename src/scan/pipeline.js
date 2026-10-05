@@ -138,7 +138,7 @@ export async function runScan({ db, config, client, coversDir, onProgress = () =
   for (const dir of config.scan.dirs) {
     if (!dir) continue;
     onProgress({ phase: 'walk', dir });
-    const result = walkVideos(dir, { ignoreDirNames: config.scan.ignoreDirNames });
+    const result = await walkVideos(dir, { ignoreDirNames: config.scan.ignoreDirNames });
     filesSeen += result.files.length;
     skipped += result.skippedFiles;
     walkErrors.push(...result.errors);
@@ -193,6 +193,8 @@ export async function runScan({ db, config, client, coversDir, onProgress = () =
     walkErrors,
     seconds: Math.round((Date.now() - started) / 100) / 10,
     apiCalls: client.requestCount,
+    startedAt: new Date(started).toISOString(),
+    finishedAt: new Date().toISOString(),
   };
   repo.finishScanRun(db, runId, {
     filesSeen,

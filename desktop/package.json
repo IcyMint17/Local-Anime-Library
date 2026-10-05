@@ -1,0 +1,19 @@
+{
+  "name": "anime-library-desktop",
+  "productName": "AnimeLibrary",
+  "version": "0.1.0",
+  "private": true,
+  "description": "本地番剧媒体库 — 桌面版外壳",
+  "type": "module",
+  "main": "main.mjs",
+  "scripts": {
+    "start": "electron .",
+    "make-icon": "electron make-icon.mjs",
+    "stage": "node stage.mjs",
+    "pack": "node stage.mjs && electron-packager staging AnimeLibrary --platform=win32 --arch=x64 --out=dist --overwrite --asar --icon=icon.ico --app-version=0.1.0 --app-copyright=\"本地番剧媒体库\" --win32metadata.CompanyName=\"本地番剧媒体库\" --win32metadata.FileDescription=\"本地番剧媒体库\""
+  },
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "electron": "^44.5.1"
+  }
+}

@@ -1,0 +1,5 @@
+node_modules/
+dist/
+staging/
+icon.ico
+icon-256.png
