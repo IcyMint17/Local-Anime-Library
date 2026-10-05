@@ -9,6 +9,13 @@ import { openDatabase, insertSeries, upsertFile, setWatchMark } from '../src/db/
 import { createRoutes } from '../src/api/routes.js';
 import { createServer } from '../src/server.js';
 
+// Every harness is tracked so a failing assertion can never leave an HTTP
+// server listening — that would keep the whole test run from exiting.
+const openHarnesses = [];
+test.after(async () => {
+  await Promise.all(openHarnesses.map((harness) => harness.close()));
+});
+
 /** Boots the real HTTP server against a throwaway database. */
 async function startHarness(options = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'anime-routes-'));
@@ -37,16 +44,21 @@ async function startHarness(options = {}) {
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
-  return {
+  let closed = false;
+  const harness = {
     dir,
     db,
     opened,
     base,
     close: async () => {
+      if (closed) return;
+      closed = true;
       await new Promise((resolve) => server.close(resolve));
       db.close();
     },
   };
+  openHarnesses.push(harness);
+  return harness;
 }
 
 /** Minimal stand-in for BangumiClient so match tests stay offline. */

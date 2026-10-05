@@ -13,21 +13,43 @@ const BASE = 'https://api.bgm.tv';
 const ANIME_TYPE = 2;
 
 /**
- * Bangumi's episode payload uses `name` / `name_cn` / `airdate`, while the rest
- * of the app (and the database) speaks `title` / `title_cn` / `air_date`.
- * Keeping the translation in one exported function is what stops the two halves
- * from silently drifting apart.
+ * Bangumi gives every episode two numbers:
+ *   `sort` — the continuous numbering across a whole series (无职转生 第二季 runs
+ *            0..12 and its 第2部分 continues 13..24; Re:Zero 第四季 runs 67..77)
+ *   `ep`   — the number printed on that particular entry (usually restarts at 1)
+ * and a `type` where 0 = 本篇, 1 = SP, 2 = OP, 3 = ED, 4 = 预告, 6 = 其他.
+ *
+ * Local files are named with the continuous numbering, so `sort` is what we
+ * match on — and what we show, because it is what Bangumi itself uses.
  */
 export function mapEpisode(episode, index = 0) {
-  const number = Number(episode?.ep ?? episode?.sort ?? index + 1);
+  const sort = Number(episode?.sort);
+  const ep = Number(episode?.ep);
+  const number = Number.isFinite(sort) ? sort : Number.isFinite(ep) ? ep : index + 1;
+  const type = Number(episode?.type);
   return {
-    number: Number.isFinite(number) ? number : index + 1,
-    sort: Number(episode?.sort ?? index + 1),
+    number,
+    sort: Number.isFinite(sort) ? sort : index + 1,
+    ep: Number.isFinite(ep) ? ep : null,
+    type: Number.isFinite(type) ? type : 0,
     title: episode?.name ?? null,
     title_cn: episode?.name_cn ?? null,
     air_date: episode?.airdate ?? episode?.air_date ?? null,
   };
 }
+
+/** 0 = 本篇, everything else (SP / OP / ED / PV / 其他) is extra content. */
+export const isMainEpisodeType = (type) => Number(type ?? 0) === 0;
+
+export const EPISODE_TYPE_LABEL = {
+  0: '正片',
+  1: '特别篇',
+  2: 'OP',
+  3: 'ED',
+  4: '预告',
+  5: 'MAD',
+  6: '其他',
+};
 
 export class BangumiClient {
   constructor({ proxy = null, userAgent, accessToken = '', minIntervalMs = 1100, cache = null, logger = console } = {}) {
@@ -93,11 +115,16 @@ export class BangumiClient {
     return subject;
   }
 
-  /** Official episode list. Type 0 = main episodes. */
+  /**
+   * Official episode list, every type in one request (the API returns all types
+   * when `type` is omitted). That is what lets a local file be recognised as an
+   * SP because Bangumi says so, rather than because of its file name.
+   */
   async getEpisodes(subjectId, { useCache = true } = {}) {
     // v2: the first version stored episodes under the wrong key names, so the
-    // titles came back empty. Bumping the key drops those stale entries.
-    const key = `episodes:v2:${subjectId}`;
+    // titles came back empty. v3 switched to `sort` numbering and started
+    // fetching SP entries, so those caches have to go as well.
+    const key = `episodes:v3:${subjectId}`;
     if (useCache && this.cache) {
       const cached = this.cache.get(key);
       if (Array.isArray(cached)) return cached;
@@ -107,7 +134,7 @@ export class BangumiClient {
     const limit = 100;
     for (;;) {
       const page = await this.call(
-        `/v0/episodes?subject_id=${subjectId}&type=0&limit=${limit}&offset=${offset}`
+        `/v0/episodes?subject_id=${subjectId}&limit=${limit}&offset=${offset}`
       );
       const data = Array.isArray(page?.data) ? page.data : [];
       episodes.push(...data);

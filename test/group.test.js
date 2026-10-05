@@ -114,10 +114,15 @@ test(
     assert.equal(konosuba.length, 2, 'Konosuba folder should split into two seasons');
     assert.deepEqual(konosuba.map((group) => group.season).sort(), [2, 3]);
 
-    // Two cours, same season -> still one entry.
+    // The author split the two cours into separate folders, so each is its own
+    // entry now. (The synthetic test above still covers the merged-folder case.)
     const mushoku2 = byFolder.get('无职转生 第二季 ～到了异世界就拿出真本事～');
-    assert.equal(mushoku2.files.length, 25);
+    assert.equal(mushoku2.files.length, 13);
     assert.equal(mushoku2.season, 2);
+    const mushoku2b = byFolder.get('无职转生 第二季 ～到了异世界就拿出真本事～ 第2部分');
+    assert.equal(mushoku2b.files.length, 12);
+    const mushoku1b = byFolder.get('无职转生～到了异世界就拿出真本事～ 第2部分');
+    assert.equal(mushoku1b.files.length, 13);
 
     // 60 videos, but only 13 are real episodes (01-12 plus the 11.5 half episode).
     const bocchi = byFolder.get('孤独摇滚！');
@@ -138,6 +143,6 @@ test(
     // The empty folder must not appear as an entry.
     assert.equal(byFolder.has('Re：从零开始的异世界生活 第四季 夺还篇'), false);
 
-    assert.equal(groups.length, 23, `expected 23 groups, got ${groups.length}`);
+    assert.equal(groups.length, 25, `expected 25 groups, got ${groups.length}`);
   }
 );

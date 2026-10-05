@@ -52,12 +52,29 @@ CREATE INDEX IF NOT EXISTS idx_files_series ON files(series_id);
 CREATE TABLE IF NOT EXISTS episodes (
   id        INTEGER PRIMARY KEY,
   series_id INTEGER,
+  ep_key    TEXT,
   number    REAL,
-  sort      INTEGER,
+  sort      REAL,
+  ep        REAL,
+  type      INTEGER DEFAULT 0,
+  bangumi_id INTEGER,
   title     TEXT,
   title_cn  TEXT,
   air_date  TEXT,
-  UNIQUE(series_id, number)
+  UNIQUE(series_id, ep_key)
+);
+
+-- A local folder can hold several Bangumi entries (无职转生 ～…～ carries both
+-- 第1部分 and 第2部分). The primary one stays on series.bangumi_id; this table
+-- records every part the folder actually covers.
+CREATE TABLE IF NOT EXISTS series_subjects (
+  series_id  INTEGER,
+  bangumi_id INTEGER,
+  position   INTEGER,
+  title_cn   TEXT,
+  title_orig TEXT,
+  primary_part INTEGER DEFAULT 0,
+  PRIMARY KEY (series_id, bangumi_id)
 );
 
 CREATE TABLE IF NOT EXISTS watch_marks (
@@ -99,6 +116,35 @@ export function migrate(db) {
   db.exec(SCHEMA);
   ensureColumn(db, 'series', 'ep_offset', 'INTEGER DEFAULT 0');
   ensureColumn(db, 'series', 'ep_offset_auto', 'INTEGER DEFAULT 1');
+  rebuildEpisodesIfStale(db);
+}
+
+/**
+ * Bangumi numbers its specials in their own space: 孤独摇滚！ has main episodes
+ * 1..12 *and* SP entries also numbered 1, 2, 3 and 11.5. Storing episodes keyed
+ * by (series, number) let those overwrite the real episodes, so the table is
+ * keyed by a composite key instead. Episode rows are cheap to refetch, so an
+ * old table is simply rebuilt.
+ */
+function rebuildEpisodesIfStale(db) {
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'episodes'").get();
+  if (!row?.sql) return;
+  if (row.sql.includes('ep_key')) return;
+  db.exec('DROP TABLE episodes');
+  db.exec(`CREATE TABLE episodes (
+    id        INTEGER PRIMARY KEY,
+    series_id INTEGER,
+    ep_key    TEXT,
+    number    REAL,
+    sort      REAL,
+    ep        REAL,
+    type      INTEGER DEFAULT 0,
+    bangumi_id INTEGER,
+    title     TEXT,
+    title_cn  TEXT,
+    air_date  TEXT,
+    UNIQUE(series_id, ep_key)
+  );`);
 }
 
 /** Adds a column when an older database predates it. */

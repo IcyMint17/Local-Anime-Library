@@ -121,6 +121,10 @@ export function getFile(db, id) {
   return db.prepare('SELECT * FROM files WHERE id = ?').get(id) ?? null;
 }
 
+export function updateFileKind(db, id, kind) {
+  db.prepare('UPDATE files SET kind = ? WHERE id = ?').run(kind, id);
+}
+
 /** Marks files that no longer exist on disk. Returns how many were marked. */
 export function markMissingFiles(db, seriesId, keepPaths) {
   const rows = db.prepare('SELECT id, path FROM files WHERE series_id = ?').all(seriesId);
@@ -139,13 +143,18 @@ export function markMissingFiles(db, seriesId, keepPaths) {
 export function replaceEpisodes(db, seriesId, episodes) {
   db.prepare('DELETE FROM episodes WHERE series_id = ?').run(seriesId);
   const insert = db.prepare(
-    'INSERT OR REPLACE INTO episodes (series_id, number, sort, title, title_cn, air_date) VALUES (?,?,?,?,?,?)'
+    `INSERT OR REPLACE INTO episodes (series_id, ep_key, number, sort, ep, type, bangumi_id, title, title_cn, air_date)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`
   );
   for (const episode of episodes) {
     insert.run(
       seriesId,
+      `${episode.bangumi_id ?? 0}:${episode.type ?? 0}:${episode.number}`,
       episode.number ?? null,
       episode.sort ?? null,
+      episode.ep ?? null,
+      episode.type ?? 0,
+      episode.bangumi_id ?? null,
       episode.title ?? null,
       episode.title_cn ?? null,
       episode.air_date ?? null
@@ -157,10 +166,57 @@ export function listEpisodes(db, seriesId) {
   return db.prepare('SELECT * FROM episodes WHERE series_id = ? ORDER BY sort').all(seriesId);
 }
 
+/** Replaces the recorded list of Bangumi parts a folder covers. */
+export function replaceSeriesSubjects(db, seriesId, subjects) {
+  db.prepare('DELETE FROM series_subjects WHERE series_id = ?').run(seriesId);
+  const insert = db.prepare(
+    `INSERT OR REPLACE INTO series_subjects (series_id, bangumi_id, position, title_cn, title_orig, primary_part)
+     VALUES (?,?,?,?,?,?)`
+  );
+  subjects.forEach((subject, index) => {
+    insert.run(
+      seriesId,
+      subject.id,
+      index,
+      subject.name_cn ?? null,
+      subject.name ?? null,
+      subject.primary ? 1 : 0
+    );
+  });
+}
+
+export function listSeriesSubjects(db, seriesId) {
+  return db.prepare('SELECT * FROM series_subjects WHERE series_id = ? ORDER BY position').all(seriesId);
+}
+
 /* ------------------------------------------------------------ watch marks */
 
 export function listWatchMarks(db, seriesId) {
   return db.prepare('SELECT * FROM watch_marks WHERE series_id = ?').all(seriesId);
+}
+
+/** Most recently watched series first — powers the 继续观看 strip. */
+export function recentWatchMarks(db, limit = 8) {
+  return db
+    .prepare(
+      `SELECT series_id, MAX(watched_at) AS watched_at
+         FROM watch_marks
+        WHERE watched = 1 AND watched_at IS NOT NULL
+        GROUP BY series_id
+        ORDER BY watched_at DESC
+        LIMIT ?`
+    )
+    .all(limit);
+}
+
+/** The item keys the user has already ticked off for one series. */
+export function watchedItemKeys(db, seriesId) {
+  return new Set(
+    db
+      .prepare('SELECT item_key FROM watch_marks WHERE series_id = ? AND watched = 1')
+      .all(seriesId)
+      .map((row) => row.item_key)
+  );
 }
 
 export function setWatchMark(db, seriesId, itemKey, watched) {

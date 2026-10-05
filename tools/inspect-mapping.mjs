@@ -54,6 +54,15 @@ for (const row of series) {
       `    ep ${String(sample.ep_label).padStart(5)} → BGM ${sample.bangumi_number ?? '-'}  ${sample.title_cn ?? '(无标题)'}`
     );
   }
+
+  const kinds = db
+    .prepare("SELECT kind, COUNT(*) AS count FROM files WHERE series_id = ? AND missing = 0 GROUP BY kind")
+    .all(row.id);
+  console.log(`  文件分类: ${kinds.map((k) => `${k.kind}=${k.count}`).join('  ')}`);
+  const types = db
+    .prepare('SELECT type, COUNT(*) AS count FROM episodes WHERE series_id = ? GROUP BY type')
+    .all(row.id);
+  console.log(`  Bangumi 类型: ${types.map((t) => `type=${t.type}(${t.count})`).join('  ')}`);
   console.log('');
 }
 

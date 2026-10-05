@@ -10,7 +10,7 @@ import { walkVideos } from './walk.js';
 import { groupFiles } from './group.js';
 import { findMatches } from '../meta/matcher.js';
 import { ensureCover } from '../meta/covers.js';
-import { applyAutoOffset } from '../library/mapping.js';
+import { syncEpisodes } from '../library/parts.js';
 import * as repo from '../db/repo.js';
 
 export function localKeyFor(group) {
@@ -93,15 +93,17 @@ async function persistGroup({ db, group, outcome, config, client, existing, cove
   const current = repo.getSeries(db, seriesId);
   if (current?.bangumi_id && matchState !== 'unmatched') {
     try {
-      const episodes = await client.getEpisodes(current.bangumi_id);
-      repo.replaceEpisodes(db, seriesId, episodes);
-      // Episode numbers now exist, so work out how the local files line up.
-      // A mapping the user pinned by hand is never overwritten.
-      if (Number(current.ep_offset_auto ?? 1) === 1) {
-        applyAutoOffset(db, current);
-      }
+      // Pulls every Bangumi part the folder covers, works out the local↔Bangumi
+      // numbering, and re-classifies files that Bangumi marks as SP.
+      await syncEpisodes({
+        db,
+        client,
+        series: current,
+        query: group.titleCandidates[0] ?? group.sourceFolder,
+        logger: client.logger,
+      });
     } catch (error) {
-      client.logger?.warn?.(`获取 ${current.bangumi_id} 的剧集列表失败: ${error.message}`);
+      client.logger?.warn?.(`同步 ${current.title_cn} 的剧集列表失败: ${error.message}`);
     }
     let detail = null;
     try {

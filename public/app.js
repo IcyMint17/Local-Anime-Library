@@ -2,6 +2,7 @@
 
 const state = {
   items: [],
+  recent: [],
   stats: {},
   lastScan: null,
   filter: 'all',
@@ -19,6 +20,131 @@ const grid = $('grid');
 const emptyState = $('emptyState');
 const overlay = $('overlay');
 const overlayPanel = $('overlayPanel');
+
+/* ------------------------------------------------------------- icon set */
+
+const ICONS = {
+  // Five deliberately different silhouettes — a grid, a warning triangle, a
+  // hollow ring, a screen with a play mark and a bare tick — so the categories
+  // can be told apart at a glance instead of all being variants of a circle.
+  all:
+    '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="7.4" height="7.4" rx="2.2"/><rect x="13.6" y="3" width="7.4" height="7.4" rx="2.2"/><rect x="3" y="13.6" width="7.4" height="7.4" rx="2.2"/><rect x="13.6" y="13.6" width="7.4" height="7.4" rx="2.2"/></svg>',
+  unmatched:
+    '<svg viewBox="0 0 24 24"><path d="M12 4.1 2.9 19.5a1.2 1.2 0 0 0 1 1.8h16.2a1.2 1.2 0 0 0 1-1.8z"/><path d="M12 9.4v4.3"/><circle cx="12" cy="17.1" r="1" class="solid"/></svg>',
+  none: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.3"/><circle cx="12" cy="12" r="4.1" stroke-dasharray="1.6 2.6"/></svg>',
+  watching:
+    '<svg viewBox="0 0 24 24"><rect x="2.7" y="4.6" width="18.6" height="14.8" rx="4"/><path d="M10.3 9.5 15 12l-4.7 2.5z" class="solid"/></svg>',
+  completed: '<svg viewBox="0 0 24 24"><path d="M4.4 12.7 9.2 17.5 19.6 6.5" stroke-width="2.4"/></svg>',
+  scan: '<svg viewBox="0 0 24 24"><path d="M3.6 7.6a2 2 0 0 1 2-2h3.1l1.8 2.2h6.9a2 2 0 0 1 2 2v8.6a2 2 0 0 1-2 2H5.6a2 2 0 0 1-2-2z"/><circle cx="13.6" cy="13.4" r="2.7"/><path d="m15.6 15.4 2.5 2.5"/></svg>',
+  settings:
+    '<svg viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2Z"/><circle cx="12" cy="12" r="3"/></svg>',
+};
+
+const MODE_ICONS = {
+  // Sun while dark (click to go light), moon while light.
+  dark: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.1"/><path d="M12 2.6v2.3M12 19.1v2.3M4.6 12H2.3M21.7 12h-2.3M6.9 6.9 5.3 5.3M18.7 18.7l-1.6-1.6M6.9 17.1l-1.6 1.6M18.7 5.3l-1.6 1.6"/></svg>',
+  light: '<svg viewBox="0 0 24 24"><path d="M20.5 14.4A8.6 8.6 0 0 1 9.6 3.5a8.6 8.6 0 1 0 10.9 10.9Z"/></svg>',
+};
+
+const NAV_ITEMS = [
+  { id: 'all', label: '全部' },
+  { id: 'unmatched', label: '未识别' },
+  { id: 'none', label: '未看' },
+  { id: 'watching', label: '观看中' },
+  { id: 'completed', label: '已看完' },
+];
+
+/* ------------------------------------------------------------ preference */
+
+const STORE = {
+  collapsed: 'anime-library.sidebar-collapsed',
+  theme: 'anime-library.theme',
+  mode: 'anime-library.mode',
+};
+
+const THEMES = [
+  { id: 'indigo', label: '靛蓝', accent: '#6c8cff', accent2: '#a06cff' },
+  { id: 'sakura', label: '樱粉', accent: '#ff6fa5', accent2: '#ff9a6c' },
+  { id: 'mint', label: '薄荷', accent: '#3fd0a8', accent2: '#4fa8ff' },
+  { id: 'amber', label: '琥珀', accent: '#f0a336', accent2: '#ff6f5a' },
+  { id: 'violet', label: '紫罗兰', accent: '#9b6cff', accent2: '#e070ff' },
+  { id: 'graphite', label: '石墨', accent: '#8d9bb5', accent2: '#c0c9dc' },
+];
+
+function readStore(key, fallback = null) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw == null ? fallback : raw;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStore(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* private mode — preferences simply do not persist */
+  }
+}
+
+function hexToRgba(hex, alpha) {
+  const value = String(hex).replace('#', '');
+  const full = value.length === 3 ? value.split('').map((ch) => ch + ch).join('') : value;
+  const number = Number.parseInt(full.slice(0, 6), 16);
+  if (!Number.isFinite(number)) return `rgba(108, 140, 255, ${alpha})`;
+  return `rgba(${(number >> 16) & 255}, ${(number >> 8) & 255}, ${number & 255}, ${alpha})`;
+}
+
+function applyTheme(theme) {
+  const root = document.documentElement.style;
+  root.setProperty('--accent', theme.accent);
+  root.setProperty('--accent-2', theme.accent2);
+  root.setProperty('--accent-soft', hexToRgba(theme.accent, 0.15));
+}
+
+function currentTheme() {
+  const raw = readStore(STORE.theme);
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed?.accent) return parsed;
+    } catch {
+      /* fall through to the default */
+    }
+  }
+  return THEMES[0];
+}
+
+function setTheme(theme) {
+  applyTheme(theme);
+  writeStore(STORE.theme, JSON.stringify(theme));
+}
+
+function setCollapsed(collapsed) {
+  $('layout').classList.toggle('is-collapsed', collapsed);
+  writeStore(STORE.collapsed, collapsed ? '1' : '0');
+}
+
+const isCollapsed = () => $('layout').classList.contains('is-collapsed');
+
+/* ------------------------------------------------------------ dark / light */
+
+function applyMode(mode) {
+  const next = mode === 'light' ? 'light' : 'dark';
+  document.documentElement.dataset.mode = next;
+  writeStore(STORE.mode, next);
+  const button = $('btnMode');
+  if (button) {
+    button.innerHTML = MODE_ICONS[next];
+    button.title = next === 'dark' ? '切换到亮色' : '切换到深色';
+  }
+  return next;
+}
+
+function currentMode() {
+  return readStore(STORE.mode) === 'light' ? 'light' : 'dark';
+}
 
 /* ------------------------------------------------------------------ utils */
 
@@ -97,33 +223,98 @@ function coverHtml(item, className) {
 async function loadLibrary() {
   const data = await api('/api/library');
   state.items = data.items;
+  state.recent = data.recent ?? [];
   state.stats = data.stats;
   state.lastScan = data.lastScan;
   renderCounts();
+  renderContinue();
   renderGrid();
-  renderBrandSub();
+  renderSidebarStats();
 }
 
-function renderBrandSub() {
-  const { total, unmatched, watching, completed } = state.stats;
-  const parts = [`共 ${total} 部`];
-  if (watching) parts.push(`观看中 ${watching}`);
-  if (completed) parts.push(`已看完 ${completed}`);
-  if (unmatched) parts.push(`待确认 ${unmatched}`);
-  if (state.lastScan?.finished_at) {
-    parts.push(`上次扫描 ${new Date(state.lastScan.finished_at).toLocaleString('zh-CN', { hour12: false })}`);
+function renderNav() {
+  $('navList').innerHTML = NAV_ITEMS.map(
+    (item) => `
+      <button class="nav-item${item.id === state.filter ? ' is-active' : ''}" data-filter="${item.id}" title="${item.label}">
+        <span class="nav-icon">${ICONS[item.id]}</span>
+        <span class="nav-text">${item.label}</span>
+        <span class="nav-count">0</span>
+      </button>`
+  ).join('');
+}
+
+function renderContinue() {
+  // 继续观看 belongs to the overview only — a filtered list should stay filtered.
+  const recent = state.filter === 'all' ? state.recent ?? [] : [];
+  const section = $('continueSection');
+  if (recent.length === 0) {
+    section.hidden = true;
+    return;
   }
-  $('brandSub').textContent = parts.join(' · ');
+  section.hidden = false;
+  const latest = recent[0];
+  $('continueSub').textContent = `最近观看：${latest.title ?? ''}`;
+  $('continueRow').innerHTML = recent.slice(0, 4).map(renderContinueCard).join('');
+}
+
+function renderContinueCard(entry) {
+  const progress = entry.progress ?? { percent: 0, watched: 0, total: 0 };
+  const next = entry.nextEpisode;
+  const nextText = next
+    ? next.number != null
+      ? `下一集 第 ${next.number} 集${next.title ? ` · ${next.title}` : ''}`
+      : `未看：${next.title ?? ''}`
+    : '全部看完了';
+  const cover = entry.coverUrl
+    ? `<img src="${escapeHtml(entry.coverUrl)}" alt="" loading="lazy" />`
+    : `<div class="poster-fallback" style="${posterFallback(entry.title ?? '')}">${escapeHtml(firstChar(entry.title))}</div>`;
+
+  return `
+    <button class="continue-card" data-id="${entry.seriesId}">
+      <div class="continue-cover">${cover}</div>
+      <div class="continue-body">
+        <div class="continue-name">${escapeHtml(entry.title ?? '未命名')}</div>
+        <div class="continue-next">${escapeHtml(nextText)}</div>
+        <div class="continue-track"><i style="width:${Math.round((progress.percent ?? 0) * 100)}%"></i></div>
+      </div>
+    </button>`;
+}
+
+function renderSidebarStats() {
+  const { total, unmatched, watching, completed } = state.stats;
+  const lines = [
+    ['番剧', `${total} 部`],
+    ['观看中', watching],
+    ['已看完', completed],
+  ];
+  if (unmatched) lines.push(['待确认', unmatched]);
+  const scan = state.lastScan?.finished_at
+    ? `上次扫描 ${new Date(state.lastScan.finished_at).toLocaleString('zh-CN', {
+        month: 'numeric',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      })}`
+    : '还没有扫描过';
+
+  $('sidebarStats').innerHTML = `
+    ${lines.map(([label, value]) => `<div class="stat-line"><span>${label}</span><b>${value}</b></div>`).join('')}
+    <div class="stat-scan">${escapeHtml(scan)}</div>`;
 }
 
 function renderCounts() {
-  $('countAll').textContent = state.items.length;
-  $('countUnmatched').textContent = state.items.filter((item) => item.match_state === 'unmatched').length;
-  $('countNone').textContent = state.items.filter(
-    (item) => item.progress.status === 'none' && item.match_state !== 'unmatched'
-  ).length;
-  $('countWatching').textContent = state.items.filter((item) => item.progress.status === 'watching').length;
-  $('countCompleted').textContent = state.items.filter((item) => item.progress.status === 'completed').length;
+  const counts = {
+    all: state.items.length,
+    unmatched: state.items.filter((item) => item.match_state === 'unmatched').length,
+    none: state.items.filter((item) => item.progress.status === 'none' && item.match_state !== 'unmatched').length,
+    watching: state.items.filter((item) => item.progress.status === 'watching').length,
+    completed: state.items.filter((item) => item.progress.status === 'completed').length,
+  };
+  for (const [id, value] of Object.entries(counts)) {
+    const node = document.querySelector(`.nav-item[data-filter="${id}"] .nav-count`);
+    if (node) node.textContent = value;
+  }
 }
 
 const FILTER_LABEL = { all: '全部', unmatched: '未识别', none: '未看', watching: '观看中', completed: '已看完' };
@@ -178,7 +369,8 @@ function renderCard(item) {
   const badges = [];
   if (item.match_state === 'unmatched') badges.push('<span class="badge badge-unmatched">待确认</span>');
   if (item.media_kind === 'movie') badges.push('<span class="badge badge-movie">剧场版</span>');
-  else if (progress.status !== 'none') {
+  // A film shows both its type and its watch state, so 已看完 is visible too.
+  if (progress.status !== 'none') {
     badges.push(`<span class="badge badge-${progress.status}">${STATUS_LABEL[progress.status]}</span>`);
   }
 
@@ -317,8 +509,7 @@ function renderDetail() {
           ${
             series.bangumi_id
               ? `<div class="mapping-value">${escapeHtml(mappingText)}</div>
-                 <div class="source-meta">${escapeHtml(mappingMeta)}</div>
-                 <button class="btn btn-small btn-ghost" data-action="edit-mapping">调整对应关系…</button>`
+                 <div class="source-meta">${escapeHtml(mappingMeta)}（在「重新匹配」里调整）</div>`
               : '<div class="source-meta">匹配到 Bangumi 之后才能计算集号对应关系。</div>'
           }
         </div>
@@ -492,23 +683,42 @@ async function openMatchDialog() {
        <div class="field">
          <label for="matchQuery">搜索 Bangumi</label>
          <input id="matchQuery" type="text" value="${escapeHtml(series.source_folder ?? '')}" />
-         <div class="field-hint">支持中文名、日文原名、罗马音。搜不到就换个关键词再试。</div>
-       </div>
-       <div class="field">
-         <label>集号对应</label>
-         <div class="field-hint">
-           绑定后会自动推断本地集号和 Bangumi 集号的对应关系——例如本地从第 67 集开始、Bangumi 从第 1 集开始，或者本地有一个第 00 集。
-           如果推断结果不对，可以在详情页的「集号对应」里手动调整。
-         </div>
+         <div class="field-hint">支持中文名、日文原名、罗马音。列表里标着「当前」的就是现在绑定的条目。</div>
        </div>
        <div class="candidate-list" id="candidateList"><span class="spinner"></span></div>
+       <div class="field mapping-block">
+         <label class="check-row"><input type="checkbox" id="mapAuto" ${
+           state.detail.mapping?.auto !== false ? 'checked' : ''
+         } /> 自动推断集号对应</label>
+         <div class="mapping-inputs">
+           <span>本地第</span>
+           <input id="mapLocal" type="number" step="1" value="${state.detail.mapping?.localMin ?? 1}" />
+           <span>集 = Bangumi 第</span>
+           <input id="mapBgm" type="number" step="1" value="${(state.detail.mapping?.localMin ?? 1) + (state.detail.mapping?.offset ?? 0)}" />
+           <span>集</span>
+         </div>
+         <div class="field-hint" id="mapPreview"></div>
+       </div>
      </div>
      <div class="dialog-foot">
        <button class="btn btn-ghost" data-action="close">取消</button>
-       <button class="btn btn-primary" id="btnBind" disabled>绑定选中的条目</button>
+         <button class="btn btn-primary" id="btnBind" disabled>应用</button>
      </div>`,
     { narrow: true }
   );
+
+  const currentId = series.bangumi_id ?? null;
+  const currentCandidate = currentId
+    ? {
+        bangumiId: currentId,
+        title: series.title_cn,
+        original: series.title_orig,
+        date: series.air_date,
+        eps: series.eps_total,
+        cover: series.coverUrl,
+        current: true,
+      }
+    : null;
 
   const runSearch = async (keyword) => {
     const list = $('candidateList');
@@ -517,9 +727,13 @@ async function openMatchDialog() {
       const data = keyword
         ? await api(`/api/search?q=${encodeURIComponent(keyword)}`)
         : await api(`/api/series/${series.id}/candidates`);
-      state.pendingCandidate = null;
-      $('btnBind').disabled = true;
-      renderCandidates(list, data.candidates ?? []);
+      const results = data.candidates ?? [];
+      // Keep the currently bound entry visible and selected, so the mapping can
+      // be adjusted without having to search for it again.
+      const list2 = currentCandidate ? [currentCandidate, ...results.filter((c) => c.bangumiId !== currentId)] : results;
+      state.pendingCandidate = currentId;
+      $('btnBind').disabled = !currentId;
+      renderCandidates(list, list2);
     } catch (error) {
       list.innerHTML = `<div class="muted">搜索失败：${escapeHtml(error.message)}</div>`;
     }
@@ -545,24 +759,57 @@ async function openMatchDialog() {
     state.pendingCandidate = Number(card.dataset.id);
     $('btnBind').disabled = false;
   });
+
+  // Episode mapping controls
+  const auto = $('mapAuto');
+  const localInput = $('mapLocal');
+  const bgmInput = $('mapBgm');
+  const refreshMapping = () => {
+    const disabled = auto.checked;
+    localInput.disabled = disabled;
+    bgmInput.disabled = disabled;
+    const local = Number(localInput.value);
+    const bgm = Number(bgmInput.value);
+    $('mapPreview').textContent = disabled
+      ? '重新按 Bangumi 的剧集列表推断（本地从第 67 集开始、Bangumi 从第 1 集开始这类情况会自动认出来）。'
+      : Number.isFinite(local) && Number.isFinite(bgm)
+        ? `即：本地集号 ${bgm - local >= 0 ? '+ ' : '− '}${Math.abs(bgm - local)} 后对应 Bangumi 集号。`
+        : '请填写两个集号。';
+  };
+  auto.addEventListener('change', refreshMapping);
+  localInput.addEventListener('input', refreshMapping);
+  bgmInput.addEventListener('input', refreshMapping);
+  refreshMapping();
+
   $('btnBind').addEventListener('click', async () => {
     if (!state.pendingCandidate) return;
     const button = $('btnBind');
     button.disabled = true;
-    button.textContent = '绑定中…';
+    button.textContent = '应用中…';
     const seriesId = series.id;
+    const mappingBody = auto.checked
+      ? { auto: true }
+      : { localNumber: Number(localInput.value), bangumiNumber: Number(bgmInput.value) };
     try {
-      await api(`/api/series/${seriesId}/match`, {
-        method: 'POST',
-        body: { bangumiId: state.pendingCandidate },
-      });
+      if (state.pendingCandidate === currentId) {
+        // Same subject — only the episode numbering changed.
+        await api(`/api/series/${seriesId}/offset`, {
+          method: 'POST',
+          body: auto.checked ? { mode: 'auto' } : { mode: 'manual', ...mappingBody },
+        });
+      } else {
+        await api(`/api/series/${seriesId}/match`, {
+          method: 'POST',
+          body: { bangumiId: state.pendingCandidate, ...mappingBody },
+        });
+      }
       await loadLibrary();
       await openDetail(seriesId);
-      toast('已重新绑定');
+      toast(state.pendingCandidate === currentId ? '已更新集号对应' : '已重新绑定');
     } catch (error) {
-      toast(`绑定失败：${error.message}`, true);
+      toast(`操作失败：${error.message}`, true);
       button.disabled = false;
-      button.textContent = '绑定选中的条目';
+      button.textContent = '应用';
     }
   });
 
@@ -580,10 +827,12 @@ function renderCandidates(container, candidates) {
         ? `<img src="${escapeHtml(candidate.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer" />`
         : '';
       return `
-        <div class="candidate" data-id="${candidate.bangumiId}">
+        <div class="candidate${candidate.current ? ' is-selected is-current' : ''}" data-id="${candidate.bangumiId}">
           <div class="candidate-cover">${cover}</div>
           <div class="candidate-body">
-            <div class="candidate-title">${escapeHtml(candidate.title ?? '')}</div>
+            <div class="candidate-title">${
+              candidate.current ? '<span class="current-badge">当前</span>' : ''
+            }${escapeHtml(candidate.title ?? '')}</div>
             <div class="candidate-meta">${escapeHtml(candidate.original ?? '')}</div>
             <div class="candidate-meta">${candidate.date ?? '播出日期未知'} · ${
         candidate.eps ? `${candidate.eps} 集` : '集数未知'
@@ -595,81 +844,6 @@ function renderCandidates(container, candidates) {
     .join('');
 }
 
-/* -------------------------------------------------------- episode mapping */
-
-function openMappingDialog() {
-  const { series, mapping } = state.detail;
-  const localMin = mapping?.localMin ?? 1;
-  const bangumiForLocalMin = localMin + (mapping?.offset ?? 0);
-
-  openOverlay(
-    `<div class="dialog-head"><h3>集号对应关系</h3><button class="btn btn-small btn-ghost" data-action="close">关闭</button></div>
-     <div class="dialog-body">
-       <div class="field">
-         <label class="check-row"><input type="checkbox" id="mapAuto" ${
-           mapping?.auto ? 'checked' : ''
-         } /> 自动推断（推荐）</label>
-         <div class="field-hint">根据本地集号和 Bangumi 的剧集列表自动对齐。重新扫描时会重新计算：本地从第 67 集开始、Bangumi 从第 1 集开始这类情况都能自动认出来。</div>
-       </div>
-       <div class="field">
-         <label>手动指定</label>
-         <div class="mapping-inputs">
-           <span>本地第</span>
-           <input id="mapLocal" type="number" step="1" value="${localMin}" />
-           <span>集 = Bangumi 第</span>
-           <input id="mapBgm" type="number" step="1" value="${bangumiForLocalMin}" />
-           <span>集</span>
-         </div>
-         <div class="field-hint" id="mapPreview"></div>
-       </div>
-     </div>
-     <div class="dialog-foot">
-       <button class="btn btn-ghost" data-action="close">取消</button>
-       <button class="btn btn-primary" id="btnSaveMapping">保存</button>
-     </div>`,
-    { narrow: true }
-  );
-
-  const auto = $('mapAuto');
-  const localInput = $('mapLocal');
-  const bgmInput = $('mapBgm');
-
-  const refresh = () => {
-    const disabled = auto.checked;
-    localInput.disabled = disabled;
-    bgmInput.disabled = disabled;
-    const local = Number(localInput.value);
-    const bgm = Number(bgmInput.value);
-    $('mapPreview').textContent = disabled
-      ? '保存后会立刻按 Bangumi 剧集列表重新推断。'
-      : Number.isFinite(local) && Number.isFinite(bgm)
-        ? `即：本地集号 ${bgm - local >= 0 ? '+ ' : '− '}${Math.abs(bgm - local)} 后对应 Bangumi 集号。`
-        : '请填写两个集号。';
-  };
-  auto.addEventListener('change', refresh);
-  localInput.addEventListener('input', refresh);
-  bgmInput.addEventListener('input', refresh);
-  refresh();
-
-  $('btnSaveMapping').addEventListener('click', async () => {
-    const button = $('btnSaveMapping');
-    const seriesId = series.id;
-    const body = auto.checked
-      ? { mode: 'auto' }
-      : { mode: 'manual', localNumber: Number(localInput.value), bangumiNumber: Number(bgmInput.value) };
-    button.disabled = true;
-    button.textContent = '保存中…';
-    try {
-      await api(`/api/series/${seriesId}/offset`, { method: 'POST', body });
-      await openDetail(seriesId);
-      toast(auto.checked ? '已重新自动推断集号对应' : '已保存手动指定的集号对应');
-    } catch (error) {
-      toast(`保存失败：${error.message}`, true);
-      button.disabled = false;
-      button.textContent = '保存';
-    }
-  });
-}
 
 /* --------------------------------------------------------------- settings */
 
@@ -685,6 +859,17 @@ async function openSettings() {
   openOverlay(
     `<div class="dialog-head"><h3>设置</h3><button class="btn btn-small btn-ghost" data-action="close">关闭</button></div>
      <div class="dialog-body">
+       <div class="field">
+         <label>主题配色</label>
+         <div class="theme-grid" id="themeGrid">
+           ${THEMES.map(
+             (theme) =>
+               `<button class="theme-swatch" data-theme="${theme.id}" title="${theme.label}" style="background: linear-gradient(135deg, ${theme.accent}, ${theme.accent2})"></button>`
+           ).join('')}
+           <input class="theme-custom" id="themeCustom" type="color" value="${currentTheme().accent}" title="自定义颜色" />
+         </div>
+         <div class="field-hint">只影响按钮、进度条、选中态等强调色，保存在本机浏览器里。</div>
+       </div>
        <div class="field">
          <label for="setDirs">扫描目录（每行一个）</label>
          <textarea id="setDirs">${escapeHtml((settings.scanDirs ?? []).join('\n'))}</textarea>
@@ -732,6 +917,28 @@ async function openSettings() {
       toast(`保存失败：${error.message}`, true);
     }
   });
+
+  const themeGrid = $('themeGrid');
+  const markActiveTheme = () => {
+    const active = currentTheme();
+    for (const node of themeGrid.querySelectorAll('.theme-swatch')) {
+      node.classList.toggle('is-active', node.dataset.theme === active.id);
+    }
+    $('themeCustom').value = active.accent;
+  };
+  themeGrid.addEventListener('click', (event) => {
+    const swatch = event.target.closest('.theme-swatch');
+    if (!swatch) return;
+    const theme = THEMES.find((item) => item.id === swatch.dataset.theme);
+    if (!theme) return;
+    setTheme(theme);
+    markActiveTheme();
+  });
+  $('themeCustom').addEventListener('input', (event) => {
+    setTheme({ id: 'custom', label: '自定义', accent: event.target.value, accent2: event.target.value });
+    markActiveTheme();
+  });
+  markActiveTheme();
 }
 
 /* ------------------------------------------------------------------ scan */
@@ -783,11 +990,12 @@ function renderScanStatus() {
   if (!running) {
     el.innerHTML = '';
     button.disabled = false;
-    button.textContent = '扫描';
+    // Rebuild rather than assign textContent — that would wipe the icon span.
+    button.innerHTML = `<span class="side-icon">${ICONS.scan}</span><span class="side-text">扫描</span>`;
     return;
   }
   button.disabled = true;
-  button.innerHTML = '<span class="spinner"></span> 扫描中';
+  button.innerHTML = '<span class="side-icon"><span class="spinner"></span></span><span class="side-text">扫描中</span>';
   if (progress?.phase === 'match' && progress.total) {
     const percent = Math.round((progress.index / progress.total) * 100);
     el.innerHTML = `<div class="bar"><i style="width:${percent}%"></i></div>正在识别 ${progress.index}/${progress.total}<br />${escapeHtml(
@@ -831,6 +1039,9 @@ document.addEventListener('click', async (event) => {
 
   const card = target.closest('.card');
   if (card) return openDetail(Number(card.dataset.id));
+
+  const continueCard = target.closest('.continue-card');
+  if (continueCard) return openDetail(Number(continueCard.dataset.id));
 
   const row = target.closest('.ep-row');
   if (row && action === 'toggle' && state.detail) {
@@ -886,7 +1097,6 @@ document.addEventListener('click', async (event) => {
   }
 
   if (action === 'rematch') openMatchDialog();
-  if (action === 'edit-mapping') openMappingDialog();
   return undefined;
 });
 
@@ -925,14 +1135,18 @@ async function playFile(fileId) {
   toast('已用系统默认播放器打开');
 }
 
-for (const button of document.querySelectorAll('.nav-item')) {
-  button.addEventListener('click', () => {
-    for (const node of document.querySelectorAll('.nav-item')) node.classList.remove('is-active');
-    button.classList.add('is-active');
-    state.filter = button.dataset.filter;
-    renderGrid();
-  });
-}
+$('navList').addEventListener('click', (event) => {
+  const button = event.target.closest('.nav-item');
+  if (!button) return;
+  for (const node of document.querySelectorAll('.nav-item')) node.classList.remove('is-active');
+  button.classList.add('is-active');
+  state.filter = button.dataset.filter;
+  renderContinue();
+  renderGrid();
+});
+
+$('btnCollapse').addEventListener('click', () => setCollapsed(!isCollapsed()));
+$('btnMode').addEventListener('click', () => applyMode(currentMode() === 'dark' ? 'light' : 'dark'));
 
 let searchDebounce = null;
 $('search').addEventListener('input', (event) => {
@@ -953,6 +1167,13 @@ $('btnScan').addEventListener('click', startScan);
 $('btnSettings').addEventListener('click', openSettings);
 
 /* ------------------------------------------------------------------ start */
+
+document.querySelector('[data-icon="scan"]').innerHTML = ICONS.scan;
+document.querySelector('[data-icon="settings"]').innerHTML = ICONS.settings;
+applyTheme(currentTheme());
+applyMode(currentMode());
+setCollapsed(readStore(STORE.collapsed) === '1');
+renderNav();
 
 loadLibrary()
   .then(() => pollScan())

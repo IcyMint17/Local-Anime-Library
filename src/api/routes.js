@@ -7,19 +7,13 @@ import * as repo from '../db/repo.js';
 import { ensureCover } from '../meta/covers.js';
 import { openWithDefaultPlayer } from '../playback/open.js';
 import { computeProgress } from '../library/progress.js';
-import { applyAutoOffset, mappingState } from '../library/mapping.js';
+import { applyAutoOffset, mappingState, matchLocalToBangumi } from '../library/mapping.js';
 import { isValidOffset, MAX_OFFSET } from '../library/offset.js';
+import { syncEpisodes, reclassifyFromBangumi } from '../library/parts.js';
+import { EPISODE_KEY, SPECIAL_KEY, MOVIE_KEY, itemKeyFor } from '../library/items.js';
+import { isMainEpisodeType } from '../meta/bangumi.js';
 
-export const EPISODE_KEY = (number) => `ep:${number}`;
-export const SPECIAL_KEY = (fileId) => `file:${fileId}`;
-export const MOVIE_KEY = 'movie';
-
-export function itemKeyFor(file) {
-  if (file.kind === 'special') return SPECIAL_KEY(file.id);
-  if (file.kind === 'movie') return MOVIE_KEY;
-  if (file.ep_number != null) return EPISODE_KEY(file.ep_number);
-  return `file:${file.id}`;
-}
+export { EPISODE_KEY, SPECIAL_KEY, MOVIE_KEY, itemKeyFor };
 
 function seriesToJson(series, progress) {
   const { local_key: _ignored, ...rest } = series;
@@ -42,6 +36,48 @@ function filesToJson(files) {
     epNumber: file.ep_number,
     epLabel: file.ep_label,
   }));
+}
+
+/** The first not-yet-watched item of a series, for the 继续观看 strip. */
+function nextUpFor(db, seriesId) {
+  const series = repo.getSeries(db, seriesId);
+  const files = repo.listFiles(db, seriesId);
+  const watched = repo.watchedItemKeys(db, seriesId);
+  const episodes = repo.listEpisodes(db, seriesId);
+  const offset = Number(series?.ep_offset ?? 0) || 0;
+
+  const pending = files
+    .filter((file) => file.kind === 'episode' && file.ep_number != null)
+    .sort((a, b) => a.ep_number - b.ep_number)
+    .find((file) => !watched.has(EPISODE_KEY(file.ep_number)));
+
+  if (!pending) {
+    const extra = files.find((file) => !watched.has(itemKeyFor(file)));
+    if (!extra) return { nextEpisode: null };
+    return {
+      nextEpisode: {
+        number: null,
+        fileId: extra.id,
+        title: extra.name,
+        kind: extra.kind,
+        total: files.length,
+        index: files.indexOf(extra) + 1,
+      },
+    };
+  }
+
+  const episode =
+    matchLocalToBangumi([pending.ep_number], episodes, offset, {
+      allowRawFallback: Number(series?.ep_offset_auto ?? 1) === 1,
+    }).get(pending.ep_number) ?? null;
+  return {
+    nextEpisode: {
+      number: pending.ep_number,
+      fileId: pending.id,
+      title: episode?.title_cn || episode?.title || null,
+      kind: 'episode',
+    },
+  };
 }
 
 /**
@@ -79,8 +115,26 @@ export function createRoutes({
   add('GET', '/api/library', () => {
     const series = repo.listSeries(db);
     const items = series.map((row) => seriesToJson(row, computeProgress(db, row)));
+    const byId = new Map(items.map((item) => [item.id, item]));
+    const recent = repo
+      .recentWatchMarks(db, 6)
+      .map((mark) => {
+        const item = byId.get(mark.series_id);
+        if (!item) return null;
+        return {
+          ...nextUpFor(db, mark.series_id),
+          seriesId: item.id,
+          title: item.title_cn,
+          coverUrl: item.coverUrl,
+          watchedAt: mark.watched_at,
+          progress: item.progress,
+          mediaKind: item.media_kind,
+        };
+      })
+      .filter(Boolean);
     return {
       items,
+      recent,
       stats: {
         total: items.length,
         unmatched: items.filter((item) => item.match_state === 'unmatched').length,
@@ -110,10 +164,14 @@ export function createRoutes({
     }
 
     const localNumbers = [...filesByEpisode.keys()].sort((a, b) => a - b);
-    const covered = new Set(localNumbers.map((number) => number + offset));
+    const pairs = matchLocalToBangumi(localNumbers, bangumiEpisodes, offset, {
+      allowRawFallback: Number(series.ep_offset_auto ?? 1) === 1,
+    });
+    const mainEpisodes = bangumiEpisodes.filter((episode) => isMainEpisodeType(episode.type));
+    const covered = new Set([...pairs.values()].map((episode) => episode.number));
 
     const episodes = localNumbers.map((number) => {
-      const bangumi = bangumiEpisodes.find((episode) => episode.number === number + offset) ?? null;
+      const bangumi = pairs.get(number) ?? null;
       const itemKey = EPISODE_KEY(number);
       return {
         number,
@@ -122,6 +180,9 @@ export function createRoutes({
         title: bangumi?.title_cn || bangumi?.title || null,
         airDate: bangumi?.air_date ?? null,
         bangumiNumber: bangumi?.number ?? null,
+        bangumiEp: bangumi?.ep ?? null,
+        type: bangumi?.type ?? null,
+        partId: bangumi?.bangumi_id ?? null,
         watched: watchedKeys.has(itemKey),
         files: filesToJson(filesByEpisode.get(number)),
       };
@@ -131,7 +192,7 @@ export function createRoutes({
     // missing episode 1" for a film the user actually owns is just noise.
     const trackMissing = bangumiEpisodes.length > 1 && series.media_kind !== 'movie' && series.media_kind !== 'special';
     const missing = trackMissing
-      ? bangumiEpisodes
+      ? mainEpisodes
           .filter((episode) => !covered.has(episode.number))
           .map((episode) => ({
             number: episode.number,
@@ -140,6 +201,9 @@ export function createRoutes({
             title: episode.title_cn || episode.title || null,
             airDate: episode.air_date,
             bangumiNumber: episode.number,
+            bangumiEp: episode.ep ?? null,
+            type: episode.type ?? 0,
+            partId: episode.bangumi_id ?? null,
             watched: watchedKeys.has(EPISODE_KEY(episode.number)),
             files: [],
           }))
@@ -167,6 +231,11 @@ export function createRoutes({
       extras,
       mapping: mappingState(db, series),
       episodeOffset: offset,
+      parts: repo.listSeriesSubjects(db, seriesId).map((part) => ({
+        bangumiId: part.bangumi_id,
+        title: part.title_cn || part.title_orig,
+        primary: part.primary_part === 1,
+      })),
       counts: {
         files: files.length,
         episodes: localNumbers.length,
@@ -281,12 +350,19 @@ export function createRoutes({
       match_score: 1,
     });
 
+    // A different subject invalidates any previously attached parts.
+    repo.replaceSeriesSubjects(db, seriesId, []);
     try {
-      repo.replaceEpisodes(db, seriesId, await client.getEpisodes(bangumiId, { useCache: false }));
+      await syncEpisodes({
+        db,
+        client,
+        series: repo.getSeries(db, seriesId),
+        query: series.source_folder,
+        logger: client.logger,
+      });
     } catch (error) {
-      client.logger?.warn?.(`获取剧集列表失败: ${error.message}`);
+      client.logger?.warn?.(`同步剧集列表失败: ${error.message}`);
     }
-    if (!wantsManual) applyAutoOffset(db, repo.getSeries(db, seriesId));
     const cover = await ensureCover({
       subject,
       coversDir: config.coversDir,
@@ -311,7 +387,9 @@ export function createRoutes({
 
     if (body.mode === 'auto' || body.auto === true) {
       applyAutoOffset(db, series);
-      return { ok: true, mapping: mappingState(db, repo.getSeries(db, seriesId)) };
+      const refreshed = repo.getSeries(db, seriesId);
+      reclassifyFromBangumi(db, seriesId, Number(refreshed.ep_offset ?? 0) || 0);
+      return { ok: true, mapping: mappingState(db, refreshed) };
     }
 
     let offset;
@@ -325,6 +403,8 @@ export function createRoutes({
     }
 
     repo.updateSeries(db, seriesId, { ep_offset: offset, ep_offset_auto: 0 });
+    // A different numbering can change which local files Bangumi considers SP.
+    reclassifyFromBangumi(db, seriesId, offset);
     return { ok: true, mapping: mappingState(db, repo.getSeries(db, seriesId)) };
   });
 
