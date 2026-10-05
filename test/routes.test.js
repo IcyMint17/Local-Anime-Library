@@ -42,6 +42,13 @@ async function startHarness(options = {}) {
     coversDir: path.join(dir, 'covers'),
     logger: { error() {}, warn() {}, log() {} },
   });
+  // Keep-alive connections (the SSE stream in particular) would otherwise make
+  // server.close() wait forever.
+  const sockets = new Set();
+  server.on('connection', (socket) => {
+    sockets.add(socket);
+    socket.on('close', () => sockets.delete(socket));
+  });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   let closed = false;
@@ -53,6 +60,7 @@ async function startHarness(options = {}) {
     close: async () => {
       if (closed) return;
       closed = true;
+      for (const socket of sockets) socket.destroy();
       await new Promise((resolve) => server.close(resolve));
       db.close();
     },

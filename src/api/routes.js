@@ -6,7 +6,7 @@ import path from 'node:path';
 import * as repo from '../db/repo.js';
 import { ensureCover } from '../meta/covers.js';
 import { openWithDefaultPlayer } from '../playback/open.js';
-import { computeProgress } from '../library/progress.js';
+import { computeProgress, computeProgressAll } from '../library/progress.js';
 import { applyAutoOffset, mappingState, matchLocalToBangumi } from '../library/mapping.js';
 import { isValidOffset, MAX_OFFSET } from '../library/offset.js';
 import { syncEpisodes, reclassifyFromBangumi } from '../library/parts.js';
@@ -114,7 +114,9 @@ export function createRoutes({
 
   add('GET', '/api/library', () => {
     const series = repo.listSeries(db);
-    const items = series.map((row) => seriesToJson(row, computeProgress(db, row)));
+    // One batched pass instead of two queries per series.
+    const progressById = computeProgressAll(db, series);
+    const items = series.map((row) => seriesToJson(row, progressById.get(row.id)));
     const byId = new Map(items.map((item) => [item.id, item]));
     const recent = repo
       .recentWatchMarks(db, 6)

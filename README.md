@@ -113,7 +113,11 @@ node --test                      # 全部测试
 node tools/inspect-library.mjs   # 看扫描/分组结果，不发网络请求
 node tools/inspect-db.mjs        # 看本地数据库内容
 node tools/evaluate-matching.mjs # 用真实库跑一遍识别准确率（会联网）
+node tools/inspect-mapping.mjs   # 看某部番的本地集号↔Bangumi 集号对照
+node tools/bench-library.mjs     # 对比 /api/library 的进度计算开销
 ```
+
+扫描进度通过 `GET /api/scan/stream`（Server-Sent Events）推送给界面，空闲时另有 5 秒的心跳轮询兜底——这样即使一次暖缓存扫描只有两秒，界面也能看到它从开始到结束的全过程。
 
 代码结构：
 

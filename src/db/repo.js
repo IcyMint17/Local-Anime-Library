@@ -219,6 +219,33 @@ export function watchedItemKeys(db, seriesId) {
   );
 }
 
+/**
+ * Everything the progress calculation needs, for every series at once.
+ *
+ * Reading progress one series at a time meant two queries per series on every
+ * library call (25 series → 50 queries, and the UI calls this after each
+ * checkbox click). Both chunks come back in a single query instead.
+ */
+export function progressSnapshot(db) {
+  const filesBySeries = new Map();
+  for (const row of db
+    .prepare('SELECT series_id, id, kind, ep_number FROM files WHERE missing = 0')
+    .all()) {
+    if (!filesBySeries.has(row.series_id)) filesBySeries.set(row.series_id, []);
+    filesBySeries.get(row.series_id).push(row);
+  }
+
+  const watchedBySeries = new Map();
+  for (const row of db
+    .prepare('SELECT series_id, item_key FROM watch_marks WHERE watched = 1')
+    .all()) {
+    if (!watchedBySeries.has(row.series_id)) watchedBySeries.set(row.series_id, new Set());
+    watchedBySeries.get(row.series_id).add(row.item_key);
+  }
+
+  return { filesBySeries, watchedBySeries };
+}
+
 export function setWatchMark(db, seriesId, itemKey, watched) {
   db.prepare(
     `INSERT INTO watch_marks (series_id, item_key, watched, watched_at) VALUES (?,?,?,?)

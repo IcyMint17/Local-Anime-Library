@@ -40,13 +40,33 @@ function createScanController({ db, config, client, coversDir, logger }) {
   let running = false;
   let progress = { phase: 'idle' };
   let last = null;
+  const listeners = new Set();
+
+  const snapshot = () => ({ running, progress, last });
+  const broadcast = () => {
+    const payload = snapshot();
+    for (const listener of listeners) {
+      try {
+        listener(payload);
+      } catch {
+        // A dead SSE connection must never break the scan itself.
+      }
+    }
+  };
+
   return {
     isRunning: () => running,
-    status: () => ({ running, progress, last }),
+    status: snapshot,
+    /** Lets the SSE endpoint push progress instead of the UI polling for it. */
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
     async start() {
       if (running) return last;
       running = true;
       progress = { phase: 'starting' };
+      broadcast();
       try {
         last = await runScan({
           db,
@@ -55,6 +75,7 @@ function createScanController({ db, config, client, coversDir, logger }) {
           coversDir,
           onProgress: (update) => {
             progress = update;
+            broadcast();
           },
         });
         progress = { phase: 'done', summary: last };
@@ -68,6 +89,7 @@ function createScanController({ db, config, client, coversDir, logger }) {
         throw error;
       } finally {
         running = false;
+        broadcast();
       }
     },
   };
@@ -128,6 +150,7 @@ export async function startLibraryApp(options = {}) {
     routes,
     publicDir: paths.publicDir,
     coversDir: paths.coversDir,
+    scanController,
     backgroundProvider: () => {
       const name = config.appearance?.background;
       if (!name) return null;

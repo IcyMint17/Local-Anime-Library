@@ -1091,55 +1091,84 @@ async function startScan() {
 }
 
 let pollTimer = null;
+let scanStream = null;
+let scanStreamErrors = 0;
 let scanTicks = 0;
 
 /**
- * Watches the scan state continuously.
+ * Reacts to a scan status, however it arrived (SSE push or polling fallback).
  *
- * The first version only kept polling while *this tab* believed a scan was
- * running, so a scan started anywhere else — the CLI, a second window, or the
- * automatic first-run scan before the page finished loading — never showed up.
- * A slow heartbeat when idle fixes that, and the fast poll while running keeps
- * the progress bar smooth.
+ * Completion is detected from the run timestamp rather than from having seen
+ * `running` flip: a warm-cache scan only takes a couple of seconds and could
+ * otherwise start and finish between two updates.
+ */
+async function handleScanStatus(status) {
+  if (!status) return;
+  const wasRunning = state.scan.running;
+  const previousFinish = state.scan.last?.finishedAt ?? null;
+  state.scan = status;
+  renderScanStatus();
+
+  if (status.running) {
+    scanTicks += 1;
+    // Let the poster wall fill in as the scan walks the library.
+    if (scanTicks % 5 === 0) await loadLibrary().catch(() => {});
+    return;
+  }
+
+  const finished = Boolean(status.last?.finishedAt) && status.last.finishedAt !== previousFinish;
+  if (wasRunning || finished) {
+    scanTicks = 0;
+    await loadLibrary().catch(() => {});
+    if (status.last) {
+      toast(
+        `扫描完成：${status.last.groups} 组，自动匹配 ${status.last.matched}，待确认 ${status.last.unmatched}`
+      );
+    }
+  }
+}
+
+/** Live progress — the server pushes it instead of the page asking for it. */
+function connectScanStream() {
+  if (typeof EventSource === 'undefined' || scanStream) return;
+  try {
+    scanStream = new EventSource('/api/scan/stream');
+    scanStream.onopen = () => {
+      scanStreamErrors = 0;
+    };
+    scanStream.onmessage = (event) => {
+      try {
+        handleScanStatus(JSON.parse(event.data));
+      } catch {
+        /* ignore a malformed frame */
+      }
+    };
+    scanStream.onerror = () => {
+      scanStreamErrors += 1;
+      // EventSource reconnects on its own; give up only if it keeps failing.
+      if (scanStreamErrors > 5) {
+        scanStream.close();
+        scanStream = null;
+      }
+    };
+  } catch {
+    scanStream = null;
+  }
+}
+
+/**
+ * Safety net. Even with the stream connected this keeps a slow heartbeat, so a
+ * missed event or a server restart cannot leave the UI stuck on a stale state.
  */
 function pollScan() {
   clearTimeout(pollTimer);
   const tick = async () => {
-    let status;
     try {
-      status = await api('/api/scan/status');
+      await handleScanStatus(await api('/api/scan/status'));
     } catch {
-      pollTimer = setTimeout(tick, 3000);
-      return;
+      /* try again on the next tick */
     }
-    const wasRunning = state.scan.running;
-    const previousFinish = state.scan.last?.finishedAt ?? null;
-    state.scan = status;
-    renderScanStatus();
-
-    if (status.running) {
-      scanTicks += 1;
-      // Let the poster wall fill in as the scan walks the library.
-      if (scanTicks % 5 === 0) await loadLibrary().catch(() => {});
-      pollTimer = setTimeout(tick, 1200);
-      return;
-    }
-
-    // A short scan can start and finish between two heartbeats, so completion is
-    // detected from the run timestamp rather than from having seen it running.
-    const finished = Boolean(status.last?.finishedAt) && status.last.finishedAt !== previousFinish;
-    if (wasRunning || finished) {
-      scanTicks = 0;
-      await loadLibrary();
-      if (status.last) {
-        toast(
-          `扫描完成：${status.last.groups} 组，自动匹配 ${status.last.matched}，待确认 ${status.last.unmatched}`
-        );
-      }
-    }
-    // Idle heartbeat. A warm-cache scan only takes ~2s, so this has to be
-    // shorter than that or the whole scan could fall between two polls.
-    pollTimer = setTimeout(tick, 1000);
+    pollTimer = setTimeout(tick, state.scan.running ? 1500 : 5000);
   };
   tick();
 }
@@ -1344,6 +1373,7 @@ applyMode(currentMode());
 setCollapsed(readStore(STORE.collapsed) === '1');
 renderNav();
 loadAppearance();
+connectScanStream();
 
 loadLibrary()
   .then(() => pollScan())

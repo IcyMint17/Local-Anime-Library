@@ -5,11 +5,8 @@
 import * as repo from '../db/repo.js';
 import { EPISODE_KEY, itemKeyFor } from './items.js';
 
-export function computeProgress(db, series) {
-  const files = repo.listFiles(db, series.id);
-  const marks = repo.listWatchMarks(db, series.id);
-  const watchedKeys = new Set(marks.filter((mark) => mark.watched).map((mark) => mark.item_key));
-
+/** Pure calculation — the database access lives in the two wrappers below. */
+export function progressFrom(files, watchedKeys, series) {
   const episodeFiles = files.filter((file) => file.kind === 'episode' && file.ep_number != null);
   const numbers = [...new Set(episodeFiles.map((file) => file.ep_number))].sort((a, b) => a - b);
   const localTotal = numbers.length;
@@ -55,4 +52,27 @@ export function computeProgress(db, series) {
     movies,
     totalFiles: files.length,
   };
+}
+
+export function computeProgress(db, series) {
+  const files = repo.listFiles(db, series.id);
+  const marks = repo.listWatchMarks(db, series.id);
+  const watchedKeys = new Set(marks.filter((mark) => mark.watched).map((mark) => mark.item_key));
+  return progressFrom(files, watchedKeys, series);
+}
+
+/**
+ * Progress for every series using two queries total instead of two per series.
+ * @returns {Map<number, object>} series id → progress
+ */
+export function computeProgressAll(db, allSeries) {
+  const { filesBySeries, watchedBySeries } = repo.progressSnapshot(db);
+  const out = new Map();
+  for (const series of allSeries) {
+    out.set(
+      series.id,
+      progressFrom(filesBySeries.get(series.id) ?? [], watchedBySeries.get(series.id) ?? new Set(), series)
+    );
+  }
+  return out;
 }

@@ -83,12 +83,56 @@ function resolveInside(root, relative) {
   return target;
 }
 
-export function createServer({ routes, publicDir, coversDir, backgroundProvider = null, logger = console }) {
+export function createServer({
+  routes,
+  publicDir,
+  coversDir,
+  backgroundProvider = null,
+  scanController = null,
+  logger = console,
+}) {
   return http.createServer(async (req, res) => {
     const requestUrl = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
     const pathname = decodeURIComponent(requestUrl.pathname);
 
     if (pathname.startsWith('/api/')) {
+      // Server-sent events: the scan pushes progress instead of the UI polling
+      // for it, so even a two-second scan is seen start to finish.
+      if (pathname === '/api/scan/stream' && scanController) {
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache, no-transform',
+          Connection: 'keep-alive',
+        });
+        res.write('retry: 3000\n\n');
+
+        const send = (payload) => {
+          try {
+            res.write(`data: ${JSON.stringify(payload)}\n\n`);
+          } catch {
+            /* the client went away */
+          }
+        };
+        send(scanController.status());
+
+        const unsubscribe = scanController.subscribe(send);
+        const ping = setInterval(() => {
+          try {
+            res.write(': ping\n\n');
+          } catch {
+            /* ignored */
+          }
+        }, 20000);
+
+        const cleanup = () => {
+          clearInterval(ping);
+          unsubscribe();
+        };
+        req.on('close', cleanup);
+        res.on('close', cleanup);
+        return undefined;
+      }
+
       const matched = matchRoute(routes, req.method, pathname);
       if (!matched) return sendJson(res, 404, { error: `未知接口 ${req.method} ${pathname}` });
       try {
