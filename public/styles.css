@@ -111,7 +111,11 @@ body::after {
   content: "";
   position: fixed;
   inset: 0;
-  z-index: -1;
+  /* NOT -1: a negative z-index child paints *before* the in-flow backgrounds of
+     its stacking context, so `body`'s opaque background used to cover the
+     picture completely — the CSS all looked right while nothing was visible.
+     The app shell is raised to z-index 1 instead. */
+  z-index: 0;
   pointer-events: none;
 }
 
@@ -129,13 +133,13 @@ body::before {
 
 /* A soft scrim keeps text readable on busy photos. */
 body::after {
-  background: rgba(12, 14, 19, 0.52);
+  background: rgba(12, 14, 19, 0.34);
   opacity: 0;
   transition: opacity 0.35s ease;
 }
 
 :root[data-mode='light'] body::after {
-  background: rgba(244, 246, 251, 0.6);
+  background: rgba(244, 246, 251, 0.46);
 }
 
 :root.has-background body::before,
@@ -243,6 +247,9 @@ textarea {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  /* Above the background and scrim layers, which sit at z-index 0. */
+  position: relative;
+  z-index: 1;
 }
 
 .topbar {
