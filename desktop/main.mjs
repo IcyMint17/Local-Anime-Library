@@ -20,6 +20,30 @@ const appRoot = fs.existsSync(path.join(here, 'src', 'app.js')) ? here : path.re
 // Keep the profile folder ASCII even though the window title is Chinese.
 app.setName('AnimeLibrary');
 
+/**
+ * Quiet Chromium's background services.
+ *
+ * A stock Electron profile runs a handful of services that wake up on their own
+ * schedule: component updates, domain reliability pings, translate and feed
+ * suggestions, hyperlink auditing. None of them can do anything useful for an
+ * app whose UI comes from 127.0.0.1, and each one costs profile writes and
+ * network chatter at startup, so they are all switched off here.
+ *
+ * Note for anyone chasing task-manager "disk" numbers: this does not change
+ * them. Those counters include named-pipe traffic, and Chromium's internal IPC
+ * dwarfs everything on this list — measured at roughly 6 KB/s per idle window,
+ * with zero files touched. The README has the details.
+ */
+app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+app.commandLine.appendSwitch('disable-background-networking');
+app.commandLine.appendSwitch('disable-component-update');
+app.commandLine.appendSwitch('disable-domain-reliability');
+app.commandLine.appendSwitch('no-pings');
+app.commandLine.appendSwitch(
+  'disable-features',
+  'Translate,OptimizationHints,MediaRouter,InterestFeedContentSuggestions'
+);
+
 const dataDir = path.join(app.getPath('userData'), 'library');
 const configPath = path.join(dataDir, 'config.json');
 const logPath = path.join(app.getPath('userData'), 'startup.log');

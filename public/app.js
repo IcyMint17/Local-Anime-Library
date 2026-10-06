@@ -1168,7 +1168,11 @@ function pollScan() {
     } catch {
       /* try again on the next tick */
     }
-    pollTimer = setTimeout(tick, state.scan.running ? 1500 : 5000);
+    // While a scan runs, or if the push stream is unavailable, keep the old
+    // cadence. When the stream is healthy and nothing is happening the poll is
+    // only a safety net, so let it idle far less often.
+    const idleDelay = scanStream ? 30000 : 5000;
+    pollTimer = setTimeout(tick, state.scan.running ? 1500 : idleDelay);
   };
   tick();
 }

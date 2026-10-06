@@ -4,3 +4,12 @@ staging/
 installer/
 icon.ico
 icon-256.png
+
+# Developer probes for the background-rendering and idle-I/O investigations.
+verify-render.mjs
+io-probe.mjs
+io-experiment.mjs
+watch-profile.ps1
+render-*.json
+render-*.txt
+io-*-report.json
