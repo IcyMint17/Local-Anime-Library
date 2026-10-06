@@ -30,7 +30,7 @@ const client = new BangumiClient({
   logger: { warn: (message) => console.warn(`  ! ${message}`) },
 });
 
-const { files } = walkVideos(root, { ignoreDirNames: config.scan.ignoreDirNames });
+const { files } = await walkVideos(root, { ignoreDirNames: config.scan.ignoreDirNames });
 const groups = groupFiles(files, { rootName: root.split(/[\\/]/).pop() });
 
 const started = Date.now();

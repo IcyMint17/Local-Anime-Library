@@ -109,19 +109,33 @@ export function groupFiles(files, options = {}) {
 
     for (const [seasonKey, items] of buckets) {
       const season = seasonKey === 0 ? null : seasonKey;
-      const parsedKinds = items.map((item) => item.parsed.kind);
-      const hasEpisode = parsedKinds.includes('episode');
-      const hasMovie = parsedKinds.includes('movie');
-
-      let kind = 'episode';
-      if (folder.kind === 'movie') kind = 'movie';
-      else if (!hasEpisode) kind = hasMovie ? 'movie' : 'special';
-
       // Prefer the title derived from real episodes; extra sub-folders like
       // "吉他英雄之路" would otherwise win the vote and pollute the search query.
       const episodeItems = items.filter((item) => item.parsed.kind === 'episode');
-      const fileTitle =
-        mostCommon((episodeItems.length ? episodeItems : items).map((item) => item.parsed.title)) ?? null;
+      const hasMovie = items.some((item) => item.parsed.kind === 'movie');
+
+      // A folder whose only episode-like file carries no episode number at all
+      // is a film. 小林家的龙女仆 怕寂寞的龙 has neither 剧场版 nor "Movie" in the
+      // folder or the file name; calling it an episode left it with zero
+      // episodes *and* hid the file from the detail view.
+      const loneUnnumbered = episodeItems.length === 1 && episodeItems[0].parsed.episode == null;
+
+      let kind = 'episode';
+      if (folder.kind === 'movie') kind = 'movie';
+      else if (episodeItems.length === 0) kind = hasMovie ? 'movie' : 'special';
+      else if (loneUnnumbered) kind = 'movie';
+
+      // The file row has to agree with the group: the detail view decides
+      // between 正片 / 特别篇 / 剧场版 from the file's own kind, so leaving the
+      // film as an "episode with no number" kept it out of every list.
+      if (kind === 'movie' && loneUnnumbered) {
+        episodeItems[0].parsed = { ...episodeItems[0].parsed, kind: 'movie' };
+      }
+
+      // Every distinct file title is a search hint: fan-sub file names usually
+      // carry the original or romaji title even when the folder does not.
+      const itemTitles = (episodeItems.length ? episodeItems : items).map((item) => item.parsed.title);
+      const fileTitles = uniqueByNormalised([mostCommon(itemTitles), ...itemTitles]).slice(0, 2);
       const releaseTitles = uniqueByNormalised(
         (episodeItems.length ? episodeItems : items).map((item) => item.releaseName)
       );
@@ -131,7 +145,7 @@ export function groupFiles(files, options = {}) {
       // ("无职转生 第二季 ～…～"), which is exactly what the search API matches on.
       const titleCandidates = uniqueByNormalised([
         seriesName,
-        fileTitle,
+        ...fileTitles,
         ...releaseTitles.map((name) => parseFileName(name).title),
       ]).slice(0, 4);
 

@@ -80,6 +80,34 @@ test('group: explicitly named 剧场版 folder becomes a movie', () => {
   assert.equal(groups[0].kind, 'movie');
 });
 
+test('group: a lone file with no episode number is a movie, not an invisible episode', () => {
+  // Real case: the folder carries the Chinese title, the release file only the
+  // English one, and there is no "Movie" marker anywhere. The old rule left this
+  // as an episode with no episode number, which the library UI then dropped.
+  const files = synthetic([
+    "小林家的龙女仆 怕寂寞的龙/[Feibanyama] Miss Kobayashi's Dragon Maid- A lonely dragon wants to be loved [BILIBILI WebRip 2160p HEVC OPUS Multi-Subs].mkv",
+  ]);
+  const groups = groupFiles(files, { rootName: 'Anime' });
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].kind, 'movie');
+  assert.equal(groups[0].episodeCount, 0);
+  assert.equal(groups[0].files.length, 1);
+  // The file name is the only place the English title appears, so it has to
+  // reach Bangumi as a search hint.
+  assert.equal(groups[0].titleCandidates[0], '小林家的龙女仆 怕寂寞的龙');
+  assert.ok(
+    groups[0].titleCandidates.some((title) => /Kobayashi/i.test(title)),
+    `expected the English title among ${JSON.stringify(groups[0].titleCandidates)}`
+  );
+});
+
+test('group: a lone file that does carry an episode number stays an episode', () => {
+  const files = synthetic(['某番/[Group] Some Show - 01 [1080p].mkv']);
+  const groups = groupFiles(files, { rootName: 'Anime' });
+  assert.equal(groups[0].kind, 'episode');
+  assert.equal(groups[0].episodeCount, 1);
+});
+
 test('group: files in an extra sub-folder become specials, not episodes', () => {
   const release = '[DBD-Raws][孤独摇滚！][01-12TV全集+特典映像][1080P][BDRip][HEVC-10bit][FLAC][MKV]';
   const files = synthetic([
@@ -136,6 +164,12 @@ test(
     assert.equal(girls.files.length, 26);
     assert.equal(girls.files.filter((item) => item.parsed.kind === 'special').length, 14);
 
+    // The 怕寂寞的龙 folder carries no movie marker in either the folder or the
+    // file name, so it can only be recognised by being a lone unnumbered file.
+    const maidDragon = byFolder.get('小林家的龙女仆 怕寂寞的龙');
+    assert.equal(maidDragon.kind, 'movie');
+    assert.equal(maidDragon.files.length, 1);
+
     assert.equal(byFolder.get('摇曳露营').kind, 'movie');
     assert.equal(byFolder.get('中二病也要谈恋爱剧场版').kind, 'movie');
     assert.equal(byFolder.get('超时空辉夜姬！').kind, 'movie');
@@ -143,6 +177,6 @@ test(
     // The empty folder must not appear as an entry.
     assert.equal(byFolder.has('Re：从零开始的异世界生活 第四季 夺还篇'), false);
 
-    assert.equal(groups.length, 25, `expected 25 groups, got ${groups.length}`);
+    assert.equal(groups.length, 26, `expected 26 groups, got ${groups.length}`);
   }
 );
