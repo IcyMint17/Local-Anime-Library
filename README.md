@@ -168,7 +168,9 @@ npm run pack         # 打包到 desktop/dist/AnimeLibrary-win32-x64
 ```
 
 打包脚本会先把 `src/`、`public/`、`config.json` 和外壳文件整理进 `staging/`，
-再交给 electron-packager 打成 `app.asar`。
+再交给 electron-packager 打成 `app.asar`。外壳文件列表在 `desktop/stage.mjs`——
+新增外壳模块时要一起加进去，脚本会检查 staging 里所有相对导入是否都能解析，
+漏文件会在打包时报错而不是等用户启动失败。
 
 | | 浏览器版 | 桌面版 |
 | --- | --- | --- |
@@ -181,6 +183,31 @@ npm run pack         # 打包到 desktop/dist/AnimeLibrary-win32-x64
 启动失败时先看它。菜单「帮助 → 打开数据文件夹」可以直接定位库文件。
 
 > 桌面版使用独立的数据目录，所以第一次启动会重新扫描一遍；这不影响命令行版的库。
+
+### 缓存与磁盘占用
+
+`%APPDATA%\AnimeLibrary` 里有两类东西：
+
+| 内容 | 例子 | 能不能删 |
+| --- | --- | --- |
+| **库本身** | `library\library.db`、`library\covers\`、`library\config.json`、`library\background.jpg` | 不能，这是你的番剧库 |
+| **Chromium 缓存** | `Cache\`、`GPUCache\`、`ShaderCache\`、`DIPS\` … | 随时可删，会自动重建 |
+
+缓存会失控是因为「重新匹配」对话框会加载 Bangumi 返回的**每一条候选的封面原图**——一次搜索 12 张、每张约 900 KB，而 Chromium 全都会写进磁盘缓存。作者这边用了一阵子就攒到 **381 MB / 986 个文件**，整个目录 409 MB。
+
+现在做了两件事：
+
+- 启动时先清空这些缓存目录，且不再往磁盘缓存写（应用需要的封面本来就存在 `library\covers\` 里，并且是从本机 127.0.0.1 取的）。实测同一个目录从 409 MB 降到 **19.5 MB**（其中 19.3 MB 是库本身），正常使用不会再涨回去。
+- 候选列表改用缩略图而不是原图，一次搜索的流量从约 11 MB 降到几百 KB。
+
+想手动清一次：
+
+```
+桌面版菜单：帮助 → 清理缓存…      # 应用开着也能用，会告诉你释放了多少
+node desktop/clean-cache.mjs      # 命令行，需要先退出应用；可加参数指定其它配置目录
+```
+
+这两个入口只会删上面那张表里的缓存，**不会碰** `library\`、设置、封面和背景图。
 
 ### 任务管理器里那个 0.1 MB/s 的「磁盘」是什么
 

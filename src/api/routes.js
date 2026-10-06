@@ -314,7 +314,14 @@ export function createRoutes({
         date: hit.date ?? null,
         eps: hit.eps ?? null,
         score: null,
-        cover: hit.images?.large ?? hit.images?.common ?? hit.images?.grid ?? null,
+        // A candidate list shows thumbnails, and "large" is ~900 KB. Pulling
+        // twelve of those per search was what filled the profile's disk cache.
+        cover:
+          hit.images?.common ??
+          hit.images?.medium ??
+          hit.images?.small ??
+          hit.images?.grid ??
+          null,
       })),
     };
   });

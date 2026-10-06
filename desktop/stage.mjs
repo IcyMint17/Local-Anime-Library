@@ -15,7 +15,7 @@ const staging = path.join(here, 'staging');
 
 const COPY_DIRS = ['src', 'public'];
 const COPY_FILES = ['config.json', 'README.md'];
-const SHELL_FILES = ['main.mjs', 'icon.ico', 'package.json'];
+const SHELL_FILES = ['main.mjs', 'cache.mjs', 'icon.ico', 'package.json'];
 
 fs.rmSync(staging, { recursive: true, force: true });
 fs.mkdirSync(staging, { recursive: true });
@@ -53,6 +53,35 @@ const walk = (dir, base = '') => {
   }
   return count;
 };
+
+/**
+ * Every relative import in the staged JavaScript has to resolve inside the
+ * bundle. Shipping main.mjs without the module it imports produced an app that
+ * died with ERR_MODULE_NOT_FOUND before it could write a single log line, so
+ * this is checked at build time rather than discovered by a user.
+ */
+function findBrokenImports(dir) {
+  const broken = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      broken.push(...findBrokenImports(full));
+      continue;
+    }
+    if (!/\.m?js$/.test(entry.name)) continue;
+    const source = fs.readFileSync(full, 'utf8');
+    for (const match of source.matchAll(/(?:from|import)\s*\(?\s*['"](\.[^'"]+)['"]/g)) {
+      const target = path.resolve(path.dirname(full), match[1]);
+      if (!fs.existsSync(target)) broken.push(`${path.relative(staging, full)} → ${match[1]}`);
+    }
+  }
+  return broken;
+}
+
+const brokenImports = findBrokenImports(staging);
+if (brokenImports.length > 0) {
+  throw new Error(`staging 里有解析不了的相对导入:\n  ${brokenImports.join('\n  ')}`);
+}
 
 console.log(`staging 就绪: ${staging}`);
 console.log(`文件数: ${walk(staging)}`);

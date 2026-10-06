@@ -6,10 +6,11 @@
  * the data directory, which must live in the user profile because the app
  * bundle itself is read-only.
  */
-import { app, BrowserWindow, Menu, shell, dialog } from 'electron';
+import { app, BrowserWindow, Menu, shell, dialog, session } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { cacheBytes, clearProfileCaches, clearProfileCachesSync, formatBytes } from './cache.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // Development layout: this file sits in desktop/ and the app lives one level up.
@@ -34,6 +35,7 @@ app.setName('AnimeLibrary');
  * dwarfs everything on this list — measured at roughly 6 KB/s per idle window,
  * with zero files touched. The README has the details.
  */
+app.commandLine.appendSwitch('disable-http-cache');
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
 app.commandLine.appendSwitch('disable-background-networking');
 app.commandLine.appendSwitch('disable-component-update');
@@ -51,6 +53,27 @@ process.env.ANIME_LIBRARY_ROOT = appRoot;
 process.env.ANIME_LIBRARY_DATA = dataDir;
 process.env.ANIME_LIBRARY_CONFIG = configPath;
 fs.mkdirSync(dataDir, { recursive: true });
+
+/**
+ * Start from an empty cache.
+ *
+ * The UI is served from localhost and every cover the library needs is already
+ * stored in `library/covers/`, so a persistent Chromium cache only ever
+ * accumulates duplicates — the match dialog's candidate thumbnails alone ran
+ * the author's profile up to 380 MB. Purging before Chromium opens the profile
+ * keeps it at a few megabytes no matter how the app is used, and it also cleans
+ * up whatever an earlier version left behind.
+ */
+if (process.env.ANIME_LIBRARY_KEEP_CACHE !== '1') {
+  const swept = clearProfileCachesSync(app.getPath('userData'));
+  if (swept.before > 0) {
+    fs.appendFileSync(
+      logPath,
+      `[${new Date().toISOString()}] 启动前清理缓存 ${formatBytes(swept.before)} → ${formatBytes(swept.after)}\n`,
+      'utf8'
+    );
+  }
+}
 
 /**
  * A packaged windowed app has nowhere to print, so startup problems would
@@ -166,6 +189,33 @@ function buildMenu() {
       {
         label: '帮助',
         submenu: [
+          {
+            label: '清理缓存…',
+            click: async () => {
+              const userData = app.getPath('userData');
+              const size = cacheBytes(userData);
+              const { response } = await dialog.showMessageBox(mainWindow, {
+                type: 'question',
+                buttons: ['清理', '取消'],
+                defaultId: 0,
+                cancelId: 1,
+                title: '清理缓存',
+                message: `删除 Chromium 的缓存文件（${formatBytes(size)}）？`,
+                detail: '只删缓存。番剧库、封面、观看记录、设置和背景图都不会动；缓存会在需要时自动重建。',
+              });
+              if (response !== 0) return;
+              const result = await clearProfileCaches(userData, { session: session.defaultSession });
+              log(`清理缓存: ${formatBytes(result.before)} → ${formatBytes(result.after)}`);
+              await dialog.showMessageBox(mainWindow, {
+                type: 'info',
+                title: '清理缓存',
+                message: `已释放 ${formatBytes(Math.max(0, result.before - result.after))}`,
+                detail: result.skipped.length
+                  ? `还有 ${result.skipped.join('、')} 正在被占用，下次启动时会自动清掉。`
+                  : `当前缓存占用 ${formatBytes(result.after)}。`,
+              });
+            },
+          },
           {
             label: '打开数据文件夹',
             click: () => shell.openPath(dataDir),
