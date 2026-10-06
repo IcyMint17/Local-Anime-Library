@@ -230,7 +230,10 @@ body {
   background-attachment: fixed;
   background-repeat: no-repeat;
   color: var(--text);
-  font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  /* HarmonyOS Sans SC goes first, then the previous stack as-is, so a machine
+     without it installed looks exactly like before. */
+  font-family: "HarmonyOS Sans SC", "HarmonyOS Sans", "Segoe UI", "Microsoft YaHei", "PingFang SC", system-ui,
+    sans-serif;
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
 }
@@ -527,6 +530,24 @@ textarea {
   color: var(--text);
   border-color: #3a4459;
   transform: translateX(-2px);
+}
+
+/* Icon buttons carry an inline <svg>; without this the browser falls back to the
+   SVG default box (300x150) and the glyph is drawn with the wrong size and
+   fill — which is how the topbar's menu button ended up looking empty. */
+.icon-btn svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.icon-btn svg .solid {
+  fill: currentColor;
+  stroke: none;
 }
 
 .icon-btn:active {

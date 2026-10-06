@@ -49,7 +49,9 @@ const MODE_ICONS = {
 
 /** Window buttons for the desktop shell's own title bar. */
 const WINDOW_ICONS = {
-  menu: '<svg viewBox="0 0 24 24"><circle cx="12" cy="5.4" r="1.5" class="solid"/><circle cx="12" cy="12" r="1.5" class="solid"/><circle cx="12" cy="18.6" r="1.5" class="solid"/></svg>',
+  // Kebab dots, drawn a little heavier than Material's so they still read at
+  // the 17px the icon buttons render at.
+  menu: '<svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2.2" class="solid"/><circle cx="12" cy="12" r="2.2" class="solid"/><circle cx="12" cy="19" r="2.2" class="solid"/></svg>',
   minimize: '<svg viewBox="0 0 16 16"><path d="M3 8h10"/></svg>',
   maximize: '<svg viewBox="0 0 16 16"><rect x="3.3" y="3.3" width="9.4" height="9.4" rx="1.2"/></svg>',
   restore:
