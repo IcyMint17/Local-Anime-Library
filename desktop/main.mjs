@@ -6,7 +6,7 @@
  * the data directory, which must live in the user profile because the app
  * bundle itself is read-only.
  */
-import { app, BrowserWindow, Menu, shell, dialog, session } from 'electron';
+import { app, BrowserWindow, Menu, shell, dialog, session, ipcMain } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -119,14 +119,45 @@ async function loadApp() {
   return module.startLibraryApp;
 }
 
+/**
+ * Tells the page whether the window is maximised, so the title bar can swap the
+ * maximise button for a restore button. Sent on every window state change and
+ * once more after each load (the listener only exists in the page).
+ */
+function sendWindowState() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('window:state', { maximized: mainWindow.isMaximized() });
+}
+
+// The window buttons in the page's title bar. Registered once for the app, the
+// handlers always act on whatever `mainWindow` currently is.
+ipcMain.on('window:minimize', () => mainWindow?.minimize());
+ipcMain.on('window:toggle-maximize', () => {
+  if (!mainWindow) return;
+  if (mainWindow.isMaximized()) mainWindow.unmaximize();
+  else mainWindow.maximize();
+});
+ipcMain.on('window:close', () => mainWindow?.close());
+ipcMain.on('window:menu', () => {
+  // A frameless window has nowhere to render a menu bar, so the topbar's menu
+  // button pops the same application menu up as a context menu.
+  const menu = Menu.getApplicationMenu();
+  if (menu) menu.popup({ window: mainWindow ?? undefined });
+});
+ipcMain.handle('window:get-state', () => ({ maximized: Boolean(mainWindow?.isMaximized()) }));
+
 function createWindow(url) {
   const iconFile = path.join(here, 'icon.ico');
+  const preloadPath = path.join(here, 'preload.cjs');
   mainWindow = new BrowserWindow({
     width: 1460,
     height: 940,
     minWidth: 940,
     minHeight: 640,
     show: false,
+    // The page draws its own title bar (drag region + window buttons), so the
+    // native one would only be a second, differently styled strip above it.
+    frame: false,
     backgroundColor: '#0c0e13',
     title: '本地番剧媒体库',
     autoHideMenuBar: true,
@@ -135,12 +166,19 @@ function createWindow(url) {
       contextIsolation: true,
       nodeIntegration: false,
       spellcheck: false,
+      ...(fs.existsSync(preloadPath) ? { preload: preloadPath } : {}),
     },
   });
 
   mainWindow.once('ready-to-show', () => mainWindow.show());
   mainWindow.loadURL(url);
-  mainWindow.webContents.on('did-finish-load', () => log('界面已加载完成'));
+  mainWindow.webContents.on('did-finish-load', () => {
+    log('界面已加载完成');
+    sendWindowState();
+  });
+  for (const event of ['maximize', 'unmaximize', 'restore']) {
+    mainWindow.on(event, sendWindowState);
+  }
   mainWindow.webContents.on('did-fail-load', (_event, code, description) => {
     log(`界面加载失败: ${code} ${description}`);
   });

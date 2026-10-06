@@ -15,7 +15,7 @@ const staging = path.join(here, 'staging');
 
 const COPY_DIRS = ['src', 'public'];
 const COPY_FILES = ['config.json', 'README.md'];
-const SHELL_FILES = ['main.mjs', 'cache.mjs', 'icon.ico', 'package.json'];
+const SHELL_FILES = ['main.mjs', 'cache.mjs', 'preload.cjs', 'icon.ico', 'package.json'];
 
 fs.rmSync(staging, { recursive: true, force: true });
 fs.mkdirSync(staging, { recursive: true });
@@ -68,7 +68,7 @@ function findBrokenImports(dir) {
       broken.push(...findBrokenImports(full));
       continue;
     }
-    if (!/\.m?js$/.test(entry.name)) continue;
+    if (!/\.(?:m|c)?js$/.test(entry.name)) continue;
     const source = fs.readFileSync(full, 'utf8');
     for (const match of source.matchAll(/(?:from|import)\s*\(?\s*['"](\.[^'"]+)['"]/g)) {
       const target = path.resolve(path.dirname(full), match[1]);

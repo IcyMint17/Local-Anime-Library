@@ -1,6 +1,9 @@
 /* 本地番剧媒体库管理器 — 样式表 */
 
 :root {
+  /* Kept in a variable so the desktop title bar's buttons can stretch over the
+     topbar's padding and reach the window edges. */
+  --topbar-pad-y: 12px;
   --bg: #0c0e13;
   --panel: #151922;
   --panel-2: #1c212c;
@@ -259,7 +262,7 @@ textarea {
   grid-template-columns: minmax(0, 1fr) minmax(0, 560px) minmax(0, 1fr);
   align-items: center;
   gap: 18px;
-  padding: 12px 22px;
+  padding: var(--topbar-pad-y) 22px;
   background: rgba(12, 14, 19, 0.86);
   backdrop-filter: blur(14px);
   border-bottom: 1px solid var(--line);
@@ -332,6 +335,105 @@ textarea {
   display: flex;
   gap: 10px;
   justify-self: end;
+}
+
+/* ------------------------------------------------ desktop window chrome */
+
+/* The desktop shell runs frameless and the page supplies the title bar: the
+   topbar is the drag handle and everything interactive in it is exempt. Only
+   active when preload.cjs injected the bridge, so the browser version keeps the
+   plain topbar with no window buttons. */
+.desktop-only {
+  display: none;
+}
+
+:root.is-desktop-shell .desktop-only {
+  display: inline-flex;
+}
+
+:root.is-desktop-shell .topbar {
+  -webkit-app-region: drag;
+  /* Let the window buttons reach the corner the way a real title bar does. */
+  padding-right: 0;
+}
+
+:root.is-desktop-shell .topbar input,
+:root.is-desktop-shell .topbar button {
+  -webkit-app-region: no-drag;
+}
+
+:root.is-desktop-shell .topbar-actions {
+  align-self: stretch;
+  align-items: center;
+}
+
+:root.is-desktop-shell .window-controls.desktop-only {
+  display: flex;
+}
+
+.window-controls {
+  align-self: stretch;
+  align-items: stretch;
+  margin-left: 8px;
+}
+
+:root.is-desktop-shell .window-controls {
+  /* Cancel the topbar's padding so the buttons are full-height, like the
+     caption buttons of a native title bar. */
+  margin-block: calc(var(--topbar-pad-y) * -1);
+}
+
+.window-btn {
+  width: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background var(--dur) ease, color var(--dur) ease;
+}
+
+.window-btn svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.window-btn svg .solid {
+  fill: currentColor;
+  stroke: none;
+}
+
+.window-btn:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: #eef1f7;
+}
+
+.window-btn:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.window-btn.is-close:hover {
+  background: #e5484d;
+  color: #fff;
+}
+
+:root[data-mode='light'] .window-btn:hover {
+  background: rgba(20, 26, 40, 0.09);
+  color: #1b2130;
+}
+
+:root[data-mode='light'] .window-btn.is-close:hover {
+  background: #e5484d;
+  color: #fff;
 }
 
 /* ---------------------------------------------------------------- buttons */

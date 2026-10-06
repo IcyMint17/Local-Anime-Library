@@ -47,6 +47,16 @@ const MODE_ICONS = {
   light: '<svg viewBox="0 0 24 24"><path d="M20.5 14.4A8.6 8.6 0 0 1 9.6 3.5a8.6 8.6 0 1 0 10.9 10.9Z"/></svg>',
 };
 
+/** Window buttons for the desktop shell's own title bar. */
+const WINDOW_ICONS = {
+  menu: '<svg viewBox="0 0 24 24"><circle cx="12" cy="5.4" r="1.5" class="solid"/><circle cx="12" cy="12" r="1.5" class="solid"/><circle cx="12" cy="18.6" r="1.5" class="solid"/></svg>',
+  minimize: '<svg viewBox="0 0 16 16"><path d="M3 8h10"/></svg>',
+  maximize: '<svg viewBox="0 0 16 16"><rect x="3.3" y="3.3" width="9.4" height="9.4" rx="1.2"/></svg>',
+  restore:
+    '<svg viewBox="0 0 16 16"><rect x="3.2" y="5.6" width="7.2" height="7.2" rx="1.2"/><path d="M5.6 5.6V4.4a1.2 1.2 0 0 1 1.2-1.2h4.8a1.2 1.2 0 0 1 1.2 1.2v4.8a1.2 1.2 0 0 1-1.2 1.2h-1.2"/></svg>',
+  close: '<svg viewBox="0 0 16 16"><path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6"/></svg>',
+};
+
 const NAV_ITEMS = [
   { id: 'all', label: '全部' },
   { id: 'unmatched', label: '未识别' },
@@ -222,6 +232,39 @@ async function loadAppearance() {
 
 function currentMode() {
   return readStore(STORE.mode) === 'light' ? 'light' : 'dark';
+}
+
+/**
+ * Turns the topbar into the window's title bar when running inside the desktop
+ * shell. The bridge is only injected by `desktop/preload.cjs`, so the browser
+ * version keeps its plain topbar with no extra buttons.
+ */
+function setupWindowControls() {
+  const shell = window.desktopWindow;
+  if (!shell) return;
+
+  document.documentElement.classList.add('is-desktop-shell');
+
+  const maxButton = $('winMax');
+  $('winMin').innerHTML = WINDOW_ICONS.minimize;
+  $('winClose').innerHTML = WINDOW_ICONS.close;
+  $('btnAppMenu').innerHTML = WINDOW_ICONS.menu;
+
+  $('winMin').addEventListener('click', () => shell.minimize());
+  maxButton.addEventListener('click', () => shell.toggleMaximize());
+  $('winClose').addEventListener('click', () => shell.close());
+  $('btnAppMenu').addEventListener('click', () => shell.openMenu());
+
+  const applyState = (state) => {
+    const maximized = Boolean(state?.maximized);
+    document.documentElement.classList.toggle('is-maximized', maximized);
+    maxButton.innerHTML = maximized ? WINDOW_ICONS.restore : WINDOW_ICONS.maximize;
+    maxButton.title = maximized ? '向下还原' : '最大化';
+    maxButton.setAttribute('aria-label', maxButton.title);
+  };
+  applyState(null);
+  shell.getState?.().then(applyState).catch(() => {});
+  shell.onStateChange?.(applyState);
 }
 
 /* ------------------------------------------------------------------ utils */
@@ -1480,6 +1523,7 @@ document.querySelector('[data-icon="settings"]').innerHTML = ICONS.settings;
 applyTheme(currentTheme());
 applyMode(currentMode());
 setCollapsed(readStore(STORE.collapsed) === '1');
+setupWindowControls();
 renderNav();
 loadAppearance();
 loadPreferences();
