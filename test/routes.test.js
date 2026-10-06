@@ -400,3 +400,80 @@ test('episode mapping: a folder numbered from 0 lines up with episode 1', async 
 
   await harness.close();
 });
+
+test('library endpoints: a file without an episode number is still listed, never silently dropped', async () => {
+  const harness = await startHarness();
+  const seriesId = insertSeries(harness.db, {
+    local_key: 'a|movie|x',
+    source_folder: '小林家的龙女仆 怕寂寞的龙',
+    title_cn: '小林家的龙女仆 怕寂寞的龙',
+    media_kind: 'episode',
+    bangumi_id: 514353,
+    match_state: 'manual',
+  });
+  // Exactly what the scanner stores when it cannot find an episode number: the
+  // parser's "episode" default with a null number.
+  const fileId = upsertFile(harness.db, seriesId, {
+    path: path.join(harness.dir, 'movie.mkv'),
+    name: "[Feibanyama] Miss Kobayashi's Dragon Maid- A lonely dragon wants to be loved.mkv",
+    kind: 'episode',
+    ep_number: null,
+  });
+
+  const detail = await (await fetch(`${harness.base}/api/series/${seriesId}`)).json();
+  assert.equal(detail.episodes.length, 0);
+  assert.equal(detail.extras.length, 1, 'the only file must not disappear from the detail view');
+  assert.equal(detail.extras[0].id, fileId);
+  assert.equal(detail.extras[0].kind, 'special');
+  assert.deepEqual(detail.extras[0].files.map((file) => file.id), [fileId]);
+  assert.equal(detail.counts.files, 1);
+
+  await harness.close();
+});
+
+test('preferences: theme, mode and sidebar survive a port change', async () => {
+  const harness = await startHarness();
+
+  const initial = await (await fetch(`${harness.base}/api/preferences`)).json();
+  assert.equal(initial.mode, 'dark');
+  assert.equal(initial.sidebarCollapsed, false);
+  assert.equal(initial.theme, null);
+
+  const saved = await (
+    await fetch(`${harness.base}/api/preferences`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        theme: { id: 'sakura', label: '樱粉', accent: '#ff6fa5', accent2: '#ff9a6c' },
+        mode: 'light',
+        sidebarCollapsed: true,
+      }),
+    })
+  ).json();
+  assert.equal(saved.ok, true);
+
+  const stored = await (await fetch(`${harness.base}/api/preferences`)).json();
+  assert.deepEqual(stored.theme, { id: 'sakura', label: '樱粉', accent: '#ff6fa5', accent2: '#ff9a6c' });
+  assert.equal(stored.mode, 'light');
+  assert.equal(stored.sidebarCollapsed, true);
+
+  // A partial update must leave the other preferences alone.
+  await fetch(`${harness.base}/api/preferences`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode: 'dark' }),
+  });
+  const after = await (await fetch(`${harness.base}/api/preferences`)).json();
+  assert.equal(after.mode, 'dark');
+  assert.equal(after.theme.accent, '#ff6fa5');
+  assert.equal(after.sidebarCollapsed, true);
+
+  const rejected = await fetch(`${harness.base}/api/preferences`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ theme: { accent: 'not-a-colour' } }),
+  });
+  assert.equal(rejected.status, 400);
+
+  await harness.close();
+});

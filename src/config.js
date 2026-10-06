@@ -77,6 +77,14 @@ export const DEFAULT_CONFIG = {
     blur: 0,
     brightness: 1,
   },
+  // Look-and-feel choices. These live in the config file rather than only in
+  // localStorage because the desktop shell picks a fresh port on every launch,
+  // which makes it a fresh browser origin with an empty localStorage.
+  ui: {
+    theme: null,
+    mode: 'dark',
+    sidebarCollapsed: false,
+  },
 };
 
 function deepMerge(base, override) {
@@ -115,7 +123,11 @@ export function loadConfig() {
 
 export function saveConfig(config) {
   const { configPath } = dataPaths();
-  const serialisable = pickKnownConfig(DEFAULT_CONFIG, deepMerge(DEFAULT_CONFIG, config));
+  // Merge the argument *over the stored file*, not over the defaults: callers
+  // pass a patch ({"appearance": …}, {"proxy": …}), and merging onto the
+  // defaults silently reset every setting the patch did not mention — which is
+  // how changing the proxy used to wipe a wallpaper.
+  const serialisable = pickKnownConfig(DEFAULT_CONFIG, deepMerge(loadConfig(), config));
   try {
     fs.writeFileSync(configPath, `${JSON.stringify(serialisable, null, 2)}\n`, 'utf8');
   } catch (error) {

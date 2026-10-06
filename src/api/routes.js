@@ -211,14 +211,18 @@ export function createRoutes({
           }))
       : [];
 
+    // A file the parser could not give an episode number to has to stay
+    // reachable. It is neither a numbered episode nor a recognised extra, and
+    // filtering on `kind !== 'episode'` alone used to drop it from both lists —
+    // so a folder like 小林家的龙女仆 怕寂寞的龙 showed a title and no file.
     const extras = files
-      .filter((file) => file.kind !== 'episode')
+      .filter((file) => file.kind !== 'episode' || file.ep_number == null)
       .map((file) => {
         const itemKey = itemKeyFor(file);
         return {
           id: file.id,
           itemKey,
-          kind: file.kind,
+          kind: file.kind === 'episode' ? 'special' : file.kind,
           title: file.name,
           watched: watchedKeys.has(itemKey),
           files: filesToJson([file]),
@@ -540,6 +544,47 @@ export function createRoutes({
     port: config.server.port,
     seriesCount: repo.listSeries(db).length,
   }));
+
+  /* ---------------------------------------------------------- preferences */
+
+  /**
+   * Look-and-feel settings that have to outlive the page origin. The desktop
+   * shell listens on a random port, so localStorage is empty on every launch —
+   * these live in config.json instead.
+   */
+  add('GET', '/api/preferences', () => {
+    const ui = config.ui ?? {};
+    return {
+      theme: ui.theme ?? null,
+      mode: ui.mode === 'light' ? 'light' : 'dark',
+      sidebarCollapsed: Boolean(ui.sidebarCollapsed),
+    };
+  });
+
+  add('POST', '/api/preferences', (_params, body) => {
+    const ui = { ...(config.ui ?? {}) };
+
+    if (body.theme && typeof body.theme === 'object') {
+      const accent = String(body.theme.accent ?? '').trim();
+      const accent2 = String(body.theme.accent2 ?? '').trim() || accent;
+      const isColour = (value) => /^#[0-9a-f]{3}(?:[0-9a-f]{3})?$/i.test(value);
+      if (!isColour(accent) || !isColour(accent2)) {
+        return { status: 400, body: { error: '颜色需要是 #rrggbb 形式' } };
+      }
+      ui.theme = {
+        id: String(body.theme.id ?? 'custom'),
+        label: String(body.theme.label ?? '自定义'),
+        accent,
+        accent2,
+      };
+    }
+    if (body.mode === 'light' || body.mode === 'dark') ui.mode = body.mode;
+    if (typeof body.sidebarCollapsed === 'boolean') ui.sidebarCollapsed = body.sidebarCollapsed;
+
+    config.ui = ui;
+    saveConfig({ ui });
+    return { ok: true, ...ui };
+  });
 
   add('PUT', '/api/settings', (_params, body) => {
     const patch = {};

@@ -89,6 +89,30 @@ function writeStore(key, value) {
   }
 }
 
+/**
+ * Preferences are mirrored to the server as well as localStorage.
+ *
+ * localStorage alone is not enough: the desktop shell listens on a fresh
+ * random port every launch, so the page gets a new origin and an empty store —
+ * which is why a chosen colour used to fall back to the default on restart.
+ */
+function savePreferences(patch) {
+  // Fire and forget: a failed write must never block the UI.
+  api('/api/preferences', { method: 'POST', body: patch }).catch(() => {});
+}
+
+/** Replays the stored preferences once the server answers. */
+async function loadPreferences() {
+  try {
+    const preferences = await api('/api/preferences');
+    if (preferences.theme) setTheme(preferences.theme);
+    applyMode(preferences.mode);
+    setCollapsed(Boolean(preferences.sidebarCollapsed));
+  } catch {
+    /* the localStorage copy is a good enough fallback */
+  }
+}
+
 function hexToRgba(hex, alpha) {
   const value = String(hex).replace('#', '');
   const full = value.length === 3 ? value.split('').map((ch) => ch + ch).join('') : value;
@@ -117,24 +141,27 @@ function currentTheme() {
   return THEMES[0];
 }
 
-function setTheme(theme) {
+function setTheme(theme, { persist = false } = {}) {
   applyTheme(theme);
   writeStore(STORE.theme, JSON.stringify(theme));
+  if (persist) savePreferences({ theme });
 }
 
-function setCollapsed(collapsed) {
+function setCollapsed(collapsed, { persist = false } = {}) {
   $('layout').classList.toggle('is-collapsed', collapsed);
   writeStore(STORE.collapsed, collapsed ? '1' : '0');
+  if (persist) savePreferences({ sidebarCollapsed: collapsed });
 }
 
 const isCollapsed = () => $('layout').classList.contains('is-collapsed');
 
 /* ------------------------------------------------------------ dark / light */
 
-function applyMode(mode) {
+function applyMode(mode, { persist = false } = {}) {
   const next = mode === 'light' ? 'light' : 'dark';
   document.documentElement.dataset.mode = next;
   writeStore(STORE.mode, next);
+  if (persist) savePreferences({ mode: next });
   const button = $('btnMode');
   if (button) {
     button.innerHTML = MODE_ICONS[next];
@@ -667,7 +694,13 @@ function renderEpisodeRow(episode) {
 
 function renderExtraRow(extra) {
   const file = extra.files?.[0];
-  const short = file ? extraLabel(file.name) : extra.title;
+  // For a film the badge already says 剧场版, so the row is more useful showing
+  // the release title than whichever bracket held the fan-sub group's name.
+  const short = file
+    ? extra.kind === 'movie'
+      ? fileTitleHint(file.name) || extraLabel(file.name)
+      : extraLabel(file.name)
+    : extra.title;
   const number = file?.epLabel ? `#${file.epLabel} ` : '';
   return `
     <div class="ep-row ${extra.watched ? 'is-watched' : ''}" data-item-key="${escapeHtml(extra.itemKey)}" data-file-id="${
@@ -692,6 +725,27 @@ const METADATA_TAG =
   /\b(?:1080|720|2160|1440|480|576)p\b|\b(?:x|h)26[45]\b|HEVC|AVC|AAC|FLAC|EAC3|AC3|DTS|\d+bit|BDRip|WebRip|TVRip|UHDRip|DVDRip|\b(?:CHS|CHT|GB|BIG5|JPSC|JPTC|JPN|SC|TC)\b|\b(?:MKV|MP4|AVI)\b|\bFin\b/i;
 
 const labelKey = (value) => String(value ?? '').toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, '');
+
+/**
+ * The part of a release file name that is actually the title: everything
+ * outside the [brackets], minus episode numbers and separators.
+ *
+ * Mirrors what the scanner does server-side — fan-sub files carry the original
+ * or romaji title even when the folder only has the Chinese one, so this is the
+ * better Bangumi search term more often than the folder name is.
+ */
+function fileTitleHint(fileName) {
+  const outside = String(fileName ?? '')
+    .replace(/\.[a-z0-9]{2,5}$/i, '')
+    .replace(/[[【][^\][【】]*[\]】]/g, ' ')
+    .replace(/\([^()]*\)/g, ' ')
+    .replace(/[-–—_]\s*\d{1,4}(?:v\d)?\s*$/, ' ')
+    .replace(/\b\d{1,4}(?:v\d)?\s*$/, ' ')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  return outside.length >= 2 ? outside : '';
+}
 
 /**
  * Release file names are long and full of noise. Pull out just the part that
@@ -724,6 +778,30 @@ function extraLabel(fileName) {
 
 async function openMatchDialog() {
   const { series } = state.detail;
+
+  // Titles found in the release file names, which are often a better search
+  // term than the folder the user happened to name by hand.
+  const searchHints = (() => {
+    const { episodes = [], extras = [] } = state.detail ?? {};
+    const seen = new Set(
+      [series?.source_folder, series?.title_cn, series?.title_orig]
+        .map(labelKey)
+        .filter(Boolean)
+    );
+    const hints = [];
+    for (const item of [...episodes, ...extras]) {
+      for (const file of item.files ?? []) {
+        const hint = fileTitleHint(file.name);
+        const key = labelKey(hint);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        hints.push(hint);
+        if (hints.length >= 4) return hints;
+      }
+    }
+    return hints;
+  })();
+
   openOverlay(
     `<div class="dialog-head"><h3>重新匹配番剧</h3><button class="btn btn-small btn-ghost" data-action="close">关闭</button></div>
      <div class="dialog-body">
@@ -736,6 +814,17 @@ async function openMatchDialog() {
          <input id="matchQuery" type="text" value="${escapeHtml(series.source_folder ?? '')}" />
          <div class="field-hint">支持中文名、日文原名、罗马音。列表里标着「当前」的就是现在绑定的条目。</div>
        </div>
+       ${
+         searchHints.length
+           ? `<div class="field">
+         <label>文件名里的标题</label>
+         <div class="hint-row" id="matchHints">${searchHints
+           .map((hint) => `<button class="btn btn-small btn-ghost" data-hint="${escapeHtml(hint)}">${escapeHtml(hint)}</button>`)
+           .join('')}</div>
+         <div class="field-hint">点一下用这个标题去搜索。</div>
+       </div>`
+           : ''
+       }
        <div class="candidate-list" id="candidateList"><span class="spinner"></span></div>
        <div class="field mapping-block">
          <label class="check-row"><input type="checkbox" id="mapAuto" ${
@@ -801,6 +890,13 @@ async function openMatchDialog() {
       clearTimeout(debounce);
       runSearch(input.value.trim());
     }
+  });
+  $('matchHints')?.addEventListener('click', (event) => {
+    const chip = event.target.closest('[data-hint]');
+    if (!chip) return;
+    clearTimeout(debounce);
+    input.value = chip.dataset.hint;
+    runSearch(chip.dataset.hint);
   });
   $('candidateList').addEventListener('click', (event) => {
     const card = event.target.closest('.candidate');
@@ -1005,12 +1101,19 @@ async function openSettings() {
     if (!swatch) return;
     const theme = THEMES.find((item) => item.id === swatch.dataset.theme);
     if (!theme) return;
-    setTheme(theme);
+    setTheme(theme, { persist: true });
     markActiveTheme();
   });
   $('themeCustom').addEventListener('input', (event) => {
+    // Live preview while the picker is dragged; only the release is saved.
     setTheme({ id: 'custom', label: '自定义', accent: event.target.value, accent2: event.target.value });
     markActiveTheme();
+  });
+  $('themeCustom').addEventListener('change', (event) => {
+    setTheme(
+      { id: 'custom', label: '自定义', accent: event.target.value, accent2: event.target.value },
+      { persist: true }
+    );
   });
   markActiveTheme();
 
@@ -1340,8 +1443,10 @@ $('navList').addEventListener('click', (event) => {
   renderGrid();
 });
 
-$('btnCollapse').addEventListener('click', () => setCollapsed(!isCollapsed()));
-$('btnMode').addEventListener('click', () => applyMode(currentMode() === 'dark' ? 'light' : 'dark'));
+$('btnCollapse').addEventListener('click', () => setCollapsed(!isCollapsed(), { persist: true }));
+$('btnMode').addEventListener('click', () =>
+  applyMode(currentMode() === 'dark' ? 'light' : 'dark', { persist: true })
+);
 
 // Coming back to the window should show the current state immediately instead
 // of waiting for the next heartbeat.
@@ -1377,6 +1482,7 @@ applyMode(currentMode());
 setCollapsed(readStore(STORE.collapsed) === '1');
 renderNav();
 loadAppearance();
+loadPreferences();
 connectScanStream();
 
 loadLibrary()

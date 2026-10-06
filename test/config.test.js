@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
-import { pickKnownConfig, DEFAULT_CONFIG, COMMON_PROXY_PORTS } from '../src/config.js';
+import { pickKnownConfig, DEFAULT_CONFIG, COMMON_PROXY_PORTS, saveConfig } from '../src/config.js';
 
 test('saveConfig shape: runtime-only keys never reach config.json', () => {
   const persisted = pickKnownConfig(DEFAULT_CONFIG, {
@@ -39,4 +42,39 @@ test('proxy defaults are sane', () => {
   assert.equal(DEFAULT_CONFIG.resolvedProxy, null);
   assert.ok(COMMON_PROXY_PORTS.includes(7890));
   assert.ok(DEFAULT_CONFIG.metadata.matchThreshold > DEFAULT_CONFIG.metadata.matchMargin);
+});
+
+test('saveConfig: a patch never resets stored settings it did not mention', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'anime-config-'));
+  const configPath = path.join(dir, 'config.json');
+  const previous = process.env.ANIME_LIBRARY_CONFIG;
+  process.env.ANIME_LIBRARY_CONFIG = configPath;
+  try {
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        scan: { dirs: ['D:\\Anime'] },
+        appearance: { background: 'background.jpg', blur: 6, brightness: 0.8 },
+        proxy: '',
+      })
+    );
+
+    // Moving a background slider must not wipe the scan folder or the proxy.
+    saveConfig({ appearance: { background: 'background.jpg', blur: 12, brightness: 0.8 } });
+    const afterAppearance = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    assert.equal(afterAppearance.appearance.blur, 12);
+    assert.deepEqual(afterAppearance.scan.dirs, ['D:\\Anime']);
+    assert.equal(afterAppearance.proxy, '');
+
+    // ...and saving an unrelated setting must not wipe the wallpaper.
+    saveConfig({ proxy: 'http://127.0.0.1:7890' });
+    const afterProxy = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    assert.equal(afterProxy.appearance.background, 'background.jpg');
+    assert.equal(afterProxy.appearance.blur, 12);
+    assert.deepEqual(afterProxy.scan.dirs, ['D:\\Anime']);
+  } finally {
+    if (previous === undefined) delete process.env.ANIME_LIBRARY_CONFIG;
+    else process.env.ANIME_LIBRARY_CONFIG = previous;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
