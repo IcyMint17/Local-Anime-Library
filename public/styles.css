@@ -889,7 +889,11 @@ textarea {
   z-index: 50;
   display: flex;
   justify-content: center;
-  align-items: center;
+  /* Flex-start plus the auto margins on the panel: that centres the panel while
+     it fits and pins it to the top once it outgrows the viewport. Centring on
+     this axis instead would push the overflow above the scrollport, where the
+     scrollbar can never reach it. */
+  align-items: flex-start;
   padding: 28px 22px;
   overflow-y: auto;
 }
@@ -900,6 +904,7 @@ textarea {
 
 .overlay-panel {
   width: min(1040px, 100%);
+  margin: auto;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);

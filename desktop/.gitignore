@@ -13,3 +13,7 @@ watch-profile.ps1
 render-*.json
 render-*.txt
 io-*-report.json
+
+# Probe for the detail overlay's scroll geometry.
+verify-detail-scroll.mjs
+detail-scroll-report.json
