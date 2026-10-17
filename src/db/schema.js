@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS series (
   rating_count  INTEGER,
   media_kind    TEXT,
   season        INTEGER,
+  favorite      INTEGER DEFAULT 0,
   ep_offset     INTEGER DEFAULT 0,
   ep_offset_auto INTEGER DEFAULT 1,
   match_state   TEXT,
@@ -116,6 +117,7 @@ export function migrate(db) {
   db.exec(SCHEMA);
   ensureColumn(db, 'series', 'ep_offset', 'INTEGER DEFAULT 0');
   ensureColumn(db, 'series', 'ep_offset_auto', 'INTEGER DEFAULT 1');
+  ensureColumn(db, 'series', 'favorite', 'INTEGER DEFAULT 0');
   rebuildEpisodesIfStale(db);
 }
 

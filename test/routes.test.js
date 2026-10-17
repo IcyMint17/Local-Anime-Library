@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { DEFAULT_CONFIG } from '../src/config.js';
-import { openDatabase, insertSeries, upsertFile, setWatchMark } from '../src/db/repo.js';
+import { openDatabase, insertSeries, upsertFile, setWatchMark, replaceEpisodes } from '../src/db/repo.js';
 import { createRoutes } from '../src/api/routes.js';
 import { createServer } from '../src/server.js';
 
@@ -21,6 +21,7 @@ async function startHarness(options = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'anime-routes-'));
   const db = openDatabase(path.join(dir, 'library.db'));
   const opened = [];
+  const revealed = [];
   const config = { ...structuredClone(DEFAULT_CONFIG), coversDir: path.join(dir, 'covers') };
 
   const { routes } = createRoutes({
@@ -32,6 +33,10 @@ async function startHarness(options = {}) {
     // Injected so tests never launch the user's media player.
     openFile: (filePath) => {
       opened.push(filePath);
+      return true;
+    },
+    revealFolder: (folder) => {
+      revealed.push(folder);
       return true;
     },
   });
@@ -56,6 +61,7 @@ async function startHarness(options = {}) {
     dir,
     db,
     opened,
+    revealed,
     base,
     close: async () => {
       if (closed) return;
@@ -431,13 +437,15 @@ test('library endpoints: a file without an episode number is still listed, never
   await harness.close();
 });
 
-test('preferences: theme, mode and sidebar survive a port change', async () => {
+test('preferences: theme, dock, glass and sidebar survive a port change', async () => {
   const harness = await startHarness();
 
   const initial = await (await fetch(`${harness.base}/api/preferences`)).json();
   assert.equal(initial.mode, 'dark');
   assert.equal(initial.sidebarCollapsed, false);
   assert.equal(initial.theme, null);
+  assert.equal(initial.dock, 'bottom');
+  assert.equal(initial.glass, 26);
 
   const saved = await (
     await fetch(`${harness.base}/api/preferences`, {
@@ -446,6 +454,8 @@ test('preferences: theme, mode and sidebar survive a port change', async () => {
       body: JSON.stringify({
         theme: { id: 'sakura', label: '樱粉', accent: '#ff6fa5', accent2: '#ff9a6c' },
         mode: 'light',
+        dock: 'left',
+        glass: 18,
         sidebarCollapsed: true,
       }),
     })
@@ -455,18 +465,22 @@ test('preferences: theme, mode and sidebar survive a port change', async () => {
   const stored = await (await fetch(`${harness.base}/api/preferences`)).json();
   assert.deepEqual(stored.theme, { id: 'sakura', label: '樱粉', accent: '#ff6fa5', accent2: '#ff9a6c' });
   assert.equal(stored.mode, 'light');
+  assert.equal(stored.dock, 'left');
+  assert.equal(stored.glass, 18);
   assert.equal(stored.sidebarCollapsed, true);
 
   // A partial update must leave the other preferences alone.
   await fetch(`${harness.base}/api/preferences`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mode: 'dark' }),
+    body: JSON.stringify({ mode: 'dark', glass: 99, dock: 'diagonal' }),
   });
   const after = await (await fetch(`${harness.base}/api/preferences`)).json();
   assert.equal(after.mode, 'dark');
   assert.equal(after.theme.accent, '#ff6fa5');
   assert.equal(after.sidebarCollapsed, true);
+  assert.equal(after.dock, 'left', 'an unknown edge is ignored');
+  assert.equal(after.glass, 48, 'glass is clamped to the slider range');
 
   const rejected = await fetch(`${harness.base}/api/preferences`, {
     method: 'POST',
@@ -474,6 +488,129 @@ test('preferences: theme, mode and sidebar survive a port change', async () => {
     body: JSON.stringify({ theme: { accent: 'not-a-colour' } }),
   });
   assert.equal(rejected.status, 400);
+
+  await harness.close();
+});
+
+test('favourites: starring a series persists without touching its updated_at', async () => {
+  const harness = await startHarness();
+  const seriesId = insertSeries(harness.db, {
+    local_key: 'a|fav|1',
+    source_folder: '收藏测试',
+    title_cn: '收藏测试',
+    media_kind: 'episode',
+    match_state: 'manual',
+  });
+  const before = harness.db.prepare('SELECT updated_at FROM series WHERE id = ?').get(seriesId).updated_at;
+
+  const starred = await (
+    await fetch(`${harness.base}/api/series/${seriesId}/favorite`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ favorite: true }),
+    })
+  ).json();
+  assert.equal(starred.ok, true);
+  assert.equal(starred.favorite, true);
+
+  const library = await (await fetch(`${harness.base}/api/library`)).json();
+  assert.equal(library.items.find((item) => item.id === seriesId).favorite, true);
+
+  const detail = await (await fetch(`${harness.base}/api/series/${seriesId}`)).json();
+  assert.equal(detail.series.favorite, true);
+
+  const after = harness.db.prepare('SELECT updated_at, favorite FROM series WHERE id = ?').get(seriesId);
+  assert.equal(after.favorite, 1);
+  assert.equal(after.updated_at, before, 'a bookmark must not reorder "最近扫描"');
+
+  const unstarred = await (
+    await fetch(`${harness.base}/api/series/${seriesId}/favorite`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ favorite: false }),
+    })
+  ).json();
+  assert.equal(unstarred.favorite, false);
+
+  const unknown = await fetch(`${harness.base}/api/series/999999/favorite`, { method: 'POST' });
+  assert.equal(unknown.status, 404);
+
+  await harness.close();
+});
+
+test('timeline: watch ticks carry the episode title, download state and air dates', async () => {
+  const harness = await startHarness();
+  const seriesId = insertSeries(harness.db, {
+    local_key: 'a|timeline|1',
+    source_folder: '时间线测试',
+    title_cn: '时间线测试',
+    media_kind: 'episode',
+    match_state: 'manual',
+  });
+  replaceEpisodes(harness.db, seriesId, [
+    { bangumi_id: 1, number: 1, sort: 1, ep: 1, type: 0, title: 'First', title_cn: '第一话' },
+    {
+      bangumi_id: 1,
+      number: 2,
+      sort: 2,
+      ep: 2,
+      type: 0,
+      title: 'Second',
+      title_cn: '第二话',
+      air_date: new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10),
+    },
+  ]);
+  const media = path.join(harness.dir, 'timeline-01.mkv');
+  fs.writeFileSync(media, 'x');
+  upsertFile(harness.db, seriesId, {
+    path: media,
+    name: path.basename(media),
+    kind: 'episode',
+    ep_number: 1,
+  });
+  setWatchMark(harness.db, seriesId, 'ep:1', true);
+
+  const timeline = await (await fetch(`${harness.base}/api/timeline`)).json();
+  const event = timeline.events.find((entry) => entry.seriesId === seriesId);
+  assert.ok(event, 'the watch tick must appear on the timeline');
+  assert.equal(event.label, '第 1 集');
+  assert.equal(event.episodeTitle, '第一话');
+  assert.equal(event.downloaded, true);
+  assert.equal(event.title, '时间线测试');
+
+  const upcoming = timeline.upcoming.find((entry) => entry.seriesId === seriesId);
+  assert.ok(upcoming, 'the future episode must be listed');
+  assert.equal(upcoming.number, 2);
+  assert.ok(timeline.additions.some((entry) => entry.id === seriesId));
+
+  await harness.close();
+});
+
+
+test('folders: POST /api/series/:id/reveal opens the folder that holds the files', async () => {
+  const harness = await startHarness();
+  const seriesId = insertSeries(harness.db, {
+    local_key: 'a|reveal|1',
+    source_folder: 'Reveal Me',
+    title_cn: 'Reveal Me',
+    media_kind: 'episode',
+    match_state: 'manual',
+  });
+  const folder = path.join(harness.dir, 'Reveal Me');
+  fs.mkdirSync(folder, { recursive: true });
+  const media = path.join(folder, 'episode 01.mkv');
+  fs.writeFileSync(media, 'x');
+  upsertFile(harness.db, seriesId, { path: media, name: 'episode 01.mkv', kind: 'episode', ep_number: 1 });
+
+  const response = await fetch(`${harness.base}/api/series/${seriesId}/reveal`, { method: 'POST' });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.folder, folder);
+  assert.deepEqual(harness.revealed, [folder]);
+
+  const unknown = await fetch(`${harness.base}/api/series/999999/reveal`, { method: 'POST' });
+  assert.equal(unknown.status, 404);
 
   await harness.close();
 });

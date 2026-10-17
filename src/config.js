@@ -83,6 +83,10 @@ export const DEFAULT_CONFIG = {
   ui: {
     theme: null,
     mode: 'dark',
+    // Floating dock edge: 'left' | 'bottom' | 'right'.
+    dock: 'bottom',
+    // Backdrop blur in px for every glass panel (the liquid-glass slider).
+    glass: 26,
     sidebarCollapsed: false,
   },
 };

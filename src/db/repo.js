@@ -253,6 +253,59 @@ export function setWatchMark(db, seriesId, itemKey, watched) {
   ).run(seriesId, itemKey, bool(watched), watched ? now() : null);
 }
 
+/**
+ * Flag a series as a favourite. Deliberately bypasses `updateSeries` so that
+ * starring something does not bump `updated_at` and reshuffle "最近扫描" —
+ * a favourite is a bookmark, not a library change.
+ */
+export function setFavorite(db, seriesId, favorite) {
+  db.prepare('UPDATE series SET favorite = ? WHERE id = ?').run(bool(favorite), seriesId);
+}
+
+/**
+ * Every watch tick with a timestamp, newest first, joined with the series it
+ * belongs to. The timeline aggregates these per day in the UI.
+ */
+export function recentWatchEvents(db, limit = 80) {
+  return db
+    .prepare(
+      `SELECT w.series_id, w.item_key, w.watched_at,
+              s.title_cn, s.title_orig, s.cover_path, s.cover_url,
+              s.media_kind, s.ep_offset
+         FROM watch_marks w
+         JOIN series s ON s.id = w.series_id
+        WHERE w.watched = 1 AND w.watched_at IS NOT NULL
+        ORDER BY w.watched_at DESC
+        LIMIT ?`
+    )
+    .all(limit);
+}
+
+/** All episodes in one query, so the timeline does not fetch per series. */
+export function allEpisodes(db) {
+  return db.prepare('SELECT * FROM episodes ORDER BY series_id, sort').all();
+}
+
+/** All files in one query, for "is this episode actually on disk" checks. */
+export function allFiles(db) {
+  return db.prepare('SELECT * FROM files WHERE missing = 0').all();
+}
+
+/** Main episodes whose air date falls in [from, to] (YYYY-MM-DD). */
+export function upcomingEpisodes(db, from, to) {
+  return db
+    .prepare(
+      `SELECT e.series_id, e.number, e.title_cn, e.title, e.air_date,
+              s.title_cn AS series_title, s.cover_path, s.cover_url, s.media_kind
+         FROM episodes e
+         JOIN series s ON s.id = e.series_id
+        WHERE e.type = 0 AND e.air_date IS NOT NULL AND e.air_date >= ? AND e.air_date <= ?
+        ORDER BY e.air_date, s.title_cn`
+    )
+    .all(from, to);
+}
+
+
 /* ------------------------------------------------------------- candidates */
 
 export function replaceCandidates(db, seriesId, candidates) {

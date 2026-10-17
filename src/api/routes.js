@@ -6,6 +6,7 @@ import path from 'node:path';
 import * as repo from '../db/repo.js';
 import { ensureCover } from '../meta/covers.js';
 import { openWithDefaultPlayer } from '../playback/open.js';
+import { openFolder as openFolderInExplorer } from '../playback/reveal.js';
 import { computeProgress, computeProgressAll } from '../library/progress.js';
 import { applyAutoOffset, mappingState, matchLocalToBangumi } from '../library/mapping.js';
 import { isValidOffset, MAX_OFFSET } from '../library/offset.js';
@@ -19,10 +20,16 @@ function seriesToJson(series, progress) {
   const { local_key: _ignored, ...rest } = series;
   return {
     ...rest,
+    favorite: Boolean(series.favorite),
     coverUrl: series.cover_path ? `/covers/${series.cover_path}` : series.cover_url ?? null,
     progress,
   };
 }
+
+const coverUrlOf = (row) => (row.cover_path ? `/covers/${row.cover_path}` : row.cover_url ?? null);
+
+const ymd = (date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
 function filesToJson(files) {
   return files.map((file) => ({
@@ -81,8 +88,9 @@ function nextUpFor(db, seriesId) {
 }
 
 /**
- * `openFile` is injectable so the playlist endpoints can be tested without
- * actually launching a media player on the machine running the tests.
+ * `openFile` / `revealFolder` are injectable so the playback and folder
+ * endpoints can be tested without actually launching apps on the machine
+ * running the tests.
  */
 export function createRoutes({
   db,
@@ -91,6 +99,7 @@ export function createRoutes({
   saveConfig,
   scanController,
   openFile = openWithDefaultPlayer,
+  revealFolder = openFolderInExplorer,
 }) {
   const routes = [];
   const add = (method, pattern, handler) => {
@@ -145,6 +154,109 @@ export function createRoutes({
       },
       lastScan: repo.lastScanRun(db),
     };
+  });
+
+  /* ------------------------------------------------------------ timeline */
+
+  /**
+   * The timeline's raw material: recent watch ticks, the next week's air dates
+   * and the latest additions. Everything is joined here rather than issuing a
+   * query per event, so the page loads in one round-trip.
+   */
+  add('GET', '/api/timeline', (_params, _body, _query) => {
+    const series = repo.listSeries(db);
+    const byId = new Map(series.map((row) => [row.id, row]));
+
+    const episodesBySeries = new Map();
+    for (const episode of repo.allEpisodes(db)) {
+      if (!episodesBySeries.has(episode.series_id)) episodesBySeries.set(episode.series_id, []);
+      episodesBySeries.get(episode.series_id).push(episode);
+    }
+
+    const filesById = new Map();
+    const episodeFile = new Map();
+    for (const file of repo.allFiles(db)) {
+      filesById.set(file.id, file);
+      if (file.kind === 'episode' && file.ep_number != null) {
+        episodeFile.set(`${file.series_id}:${file.ep_number}`, file);
+      }
+    }
+
+    const events = repo
+      .recentWatchEvents(db, 80)
+      .map((row) => {
+        const item = byId.get(row.series_id);
+        if (!item) return null;
+        const itemKey = row.item_key;
+        let number = null;
+        let label = '';
+        let episodeTitle = null;
+        let kind = row.media_kind ?? 'episode';
+        let file = null;
+
+        if (itemKey.startsWith('ep:')) {
+          number = Number(itemKey.slice(3));
+          const episodes = episodesBySeries.get(row.series_id) ?? [];
+          const offset = Number(row.ep_offset ?? 0) || 0;
+          const episode =
+            matchLocalToBangumi([number], episodes, offset, {
+              allowRawFallback: Number(item.ep_offset_auto ?? 1) === 1,
+            }).get(number) ?? null;
+          episodeTitle = episode?.title_cn || episode?.title || null;
+          label = `第 ${number} 集`;
+          file = episodeFile.get(`${row.series_id}:${number}`) ?? null;
+        } else if (itemKey === 'movie') {
+          label = '剧场版';
+          kind = 'movie';
+        } else if (itemKey.startsWith('file:')) {
+          file = filesById.get(Number(itemKey.slice(5))) ?? null;
+          kind = file?.kind ?? 'special';
+          label = kind === 'movie' ? '剧场版' : '特别篇';
+          episodeTitle = file?.ep_label ? `#${file.ep_label}` : file?.name ?? null;
+        }
+
+        return {
+          seriesId: row.series_id,
+          title: row.title_cn || row.title_orig || item.source_folder,
+          coverUrl: coverUrlOf(item),
+          itemKey,
+          number,
+          label,
+          episodeTitle,
+          kind,
+          fileId: file?.id ?? null,
+          downloaded: Boolean(file) && fs.existsSync(file.path),
+          watchedAt: row.watched_at,
+        };
+      })
+      .filter(Boolean);
+
+    const today = new Date();
+    const weekEnd = new Date(today);
+    weekEnd.setDate(weekEnd.getDate() + 7);
+    const upcoming = repo.upcomingEpisodes(db, ymd(today), ymd(weekEnd)).map((row) => ({
+      seriesId: row.series_id,
+      title: row.series_title || row.title,
+      coverUrl: coverUrlOf(row),
+      number: row.number,
+      episodeTitle: row.title_cn || row.title || null,
+      airDate: row.air_date,
+      mediaKind: row.media_kind,
+    }));
+
+    const additions = [...series]
+      .sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')))
+      .slice(0, 8)
+      .map((row) => ({
+        id: row.id,
+        title: row.title_cn || row.title_orig || row.source_folder,
+        coverUrl: coverUrlOf(row),
+        createdAt: row.created_at,
+        mediaKind: row.media_kind,
+        rating: row.rating,
+      }));
+
+    return { events, upcoming, additions };
   });
 
   add('GET', '/api/series/:id', (params) => {
@@ -283,6 +395,15 @@ export function createRoutes({
       }
     }
     return { ok: true, progress: computeProgress(db, series) };
+  });
+
+  add('POST', '/api/series/:id/favorite', (params, body) => {
+    const seriesId = Number(params.id);
+    const series = repo.getSeries(db, seriesId);
+    if (!series) return { status: 404, body: { error: 'not found' } };
+    const favorite = Boolean(body.favorite);
+    repo.setFavorite(db, seriesId, favorite);
+    return { ok: true, favorite };
   });
 
   /* ------------------------------------------------------------- matching */
@@ -455,6 +576,22 @@ export function createRoutes({
     return { ok: true, path: file.path };
   });
 
+  /**
+   * Opens the folder a series lives in. The scanner only stores the leaf folder
+   * name on the series row, so the real location comes from its files.
+   */
+  add('POST', '/api/series/:id/reveal', (params) => {
+    const series = repo.getSeries(db, Number(params.id));
+    if (!series) return { status: 404, body: { error: 'not found' } };
+    const file = repo
+      .listFiles(db, series.id)
+      .find((row) => row.path && fs.existsSync(row.path));
+    if (!file) return { status: 410, body: { error: '番剧文件夹不存在或所有文件都已移动' } };
+    const folder = path.dirname(file.path);
+    revealFolder(folder);
+    return { ok: true, folder };
+  });
+
   /* ----------------------------------------------------------------- scan */
 
   add('POST', '/api/scan', () => {
@@ -564,6 +701,8 @@ export function createRoutes({
     return {
       theme: ui.theme ?? null,
       mode: ui.mode === 'light' ? 'light' : 'dark',
+      dock: ['left', 'right'].includes(ui.dock) ? ui.dock : 'bottom',
+      glass: Number.isFinite(Number(ui.glass)) ? Math.max(0, Math.min(48, Number(ui.glass))) : 26,
       sidebarCollapsed: Boolean(ui.sidebarCollapsed),
     };
   });
@@ -586,6 +725,10 @@ export function createRoutes({
       };
     }
     if (body.mode === 'light' || body.mode === 'dark') ui.mode = body.mode;
+    if (['left', 'bottom', 'right'].includes(body.dock)) ui.dock = body.dock;
+    if (Number.isFinite(Number(body.glass))) {
+      ui.glass = Math.max(0, Math.min(48, Number(body.glass)));
+    }
     if (typeof body.sidebarCollapsed === 'boolean') ui.sidebarCollapsed = body.sidebarCollapsed;
 
     config.ui = ui;

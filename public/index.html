@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-mode="dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -8,80 +8,57 @@
     <link rel="icon" href="/icon.jpg" />
   </head>
   <body>
-    <div id="app">
+    <div class="ambient" aria-hidden="true">
+      <span class="ambient-orb ambient-orb--a"></span>
+      <span class="ambient-orb ambient-orb--b"></span>
+      <span class="ambient-orb ambient-orb--c"></span>
+    </div>
+
+    <div id="app" class="shell">
       <header class="topbar">
-        <div class="brand">
-          <img class="brand-icon" src="/icon.jpg" alt="" />
-          <span class="brand-title">本地番剧媒体库</span>
-        </div>
-        <div class="search-wrap">
-          <input id="search" class="search" type="search" placeholder="搜索番剧名 / 文件夹名…" autocomplete="off" />
-        </div>
+        <a class="brand" href="#/home" data-nav="home" aria-label="回到首页">
+          <span class="brand-mark"><img src="/icon.jpg" alt="" /></span>
+          <span class="brand-text">
+            <strong>本地番剧媒体库</strong>
+            <span>Anime Media Center</span>
+          </span>
+        </a>
+
+        <label class="search-box" for="search">
+          <span class="search-icon" data-icon="search"></span>
+          <input id="search" class="search" type="search" placeholder="搜索番剧 / 文件夹…" autocomplete="off" spellcheck="false" />
+          <kbd class="search-kbd">/</kbd>
+        </label>
+
         <div class="topbar-actions">
-          <button class="icon-btn desktop-only" id="btnAppMenu" title="菜单"></button>
-          <button class="icon-btn mode-toggle" id="btnMode" title="切换深色 / 亮色"></button>
+          <button class="icon-btn" id="btnMode" type="button" title="切换深色 / 亮色" aria-label="切换深色 / 亮色"></button>
+          <button class="icon-btn" id="btnGotoSettings" type="button" data-nav="settings" title="设置" aria-label="设置"></button>
+          <button class="icon-btn desktop-only" id="btnAppMenu" type="button" title="菜单" aria-label="菜单"></button>
           <div class="window-controls desktop-only" id="windowControls">
-            <button class="window-btn" id="winMin" title="最小化" aria-label="最小化"></button>
-            <button class="window-btn" id="winMax" title="最大化" aria-label="最大化"></button>
-            <button class="window-btn is-close" id="winClose" title="关闭" aria-label="关闭"></button>
+            <button class="window-btn" id="winMin" type="button" title="最小化" aria-label="最小化"></button>
+            <button class="window-btn" id="winMax" type="button" title="最大化" aria-label="最大化"></button>
+            <button class="window-btn is-close" id="winClose" type="button" title="关闭" aria-label="关闭"></button>
           </div>
         </div>
       </header>
 
-      <div class="layout" id="layout">
-        <nav class="sidebar" id="sidebar">
-          <div class="sidebar-head">
-            <span class="sidebar-label">媒体库</span>
-            <button class="icon-btn sidebar-toggle" id="btnCollapse" title="收起 / 展开侧边栏">
-              <span class="toggle-glyph">«</span>
-            </button>
-          </div>
-          <div class="nav-list" id="navList"></div>
+      <main class="pages" id="pages">
+        <section class="page" id="page-home" data-page="home" aria-label="主页"></section>
+        <section class="page" id="page-timeline" data-page="timeline" aria-label="时间线" hidden></section>
+        <section class="page" id="page-library" data-page="library" aria-label="媒体库" hidden></section>
+        <section class="page" id="page-favorites" data-page="favorites" aria-label="收藏" hidden></section>
+        <section class="page" id="page-settings" data-page="settings" aria-label="设置" hidden></section>
+      </main>
 
-          <div class="sidebar-foot">
-            <button class="side-action is-primary" id="btnScan" title="扫描媒体库">
-              <span class="side-icon" data-icon="scan"></span>
-              <span class="side-text">扫描</span>
-            </button>
-            <button class="side-action" id="btnSettings" title="设置">
-              <span class="side-icon" data-icon="settings"></span>
-              <span class="side-text">设置</span>
-            </button>
-            <div class="scan-status" id="scanStatus"></div>
-            <div class="sidebar-stats" id="sidebarStats">正在载入…</div>
-          </div>
-        </nav>
-
-        <main class="content">
-          <section class="continue" id="continueSection" hidden>
-            <div class="continue-head">
-              <span class="continue-title">继续观看</span>
-              <span class="continue-sub" id="continueSub"></span>
-            </div>
-            <div class="continue-row" id="continueRow"></div>
-          </section>
-
-          <div class="toolbar">
-            <div class="toolbar-info" id="toolbarInfo">—</div>
-            <label class="select-wrap">
-              排序
-              <select id="sort">
-                <option value="recent">最近扫描</option>
-                <option value="rating">评分</option>
-                <option value="title">名称</option>
-                <option value="progress">观看进度</option>
-                <option value="files">文件数</option>
-              </select>
-            </label>
-          </div>
-          <div id="grid" class="grid"></div>
-          <div id="emptyState" class="empty" hidden></div>
-        </main>
-      </div>
+      <nav class="dock" id="dock" aria-label="主导航"></nav>
     </div>
 
     <div id="overlay" class="overlay" hidden>
-      <div id="overlayPanel" class="overlay-panel"></div>
+      <div id="overlayPanel" class="overlay-panel" role="dialog" aria-modal="true"></div>
+    </div>
+
+    <div id="fileOverlay" class="overlay overlay--stacked" hidden>
+      <div id="filePanel" class="overlay-panel dialog-panel file-panel" role="dialog" aria-modal="true" aria-label="文件信息"></div>
     </div>
 
     <div id="toast" class="toast" hidden></div>

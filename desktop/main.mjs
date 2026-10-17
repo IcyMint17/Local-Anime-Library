@@ -146,6 +146,38 @@ ipcMain.on('window:menu', () => {
 });
 ipcMain.handle('window:get-state', () => ({ maximized: Boolean(mainWindow?.isMaximized()) }));
 
+/** Cache size / cleanup for the Settings page. */
+ipcMain.handle('cache:info', () => {
+  const userData = app.getPath('userData');
+  const bytes = cacheBytes(userData);
+  return { bytes, text: formatBytes(bytes), path: userData };
+});
+
+ipcMain.handle('cache:clear', async () => {
+  const userData = app.getPath('userData');
+  const size = cacheBytes(userData);
+  const { response } = await dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    buttons: ['清理', '取消'],
+    defaultId: 0,
+    cancelId: 1,
+    title: '清理缓存',
+    message: `删除 Chromium 的缓存文件（${formatBytes(size)}）？`,
+    detail: '只删缓存。番剧库、封面、观看记录、设置和背景图都不会动；缓存会在需要时自动重建。',
+  });
+  if (response !== 0) return { canceled: true, bytes: size, text: formatBytes(size) };
+  const result = await clearProfileCaches(userData, { session: session.defaultSession });
+  log(`清理缓存: ${formatBytes(result.before)} → ${formatBytes(result.after)}`);
+  return {
+    canceled: false,
+    before: result.before,
+    after: result.after,
+    skipped: result.skipped,
+    text: formatBytes(result.after),
+    freed: formatBytes(Math.max(0, result.before - result.after)),
+  };
+});
+
 function createWindow(url) {
   const iconFile = path.join(here, 'icon.ico');
   const preloadPath = path.join(here, 'preload.cjs');
