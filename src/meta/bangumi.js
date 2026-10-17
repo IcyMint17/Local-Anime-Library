@@ -147,6 +147,45 @@ export class BangumiClient {
     return mapped;
   }
 
+  /** Characters (with voice actors) for a subject. */
+  async getSubjectCharacters(subjectId, { useCache = true } = {}) {
+    const key = `characters:v2:${subjectId}`;
+    if (useCache && this.cache) {
+      const cached = this.cache.get(key);
+      if (Array.isArray(cached)) return cached;
+    }
+    const payload = await this.call(`/v0/subjects/${subjectId}/characters`);
+    const data = Array.isArray(payload) ? payload : payload?.data ?? [];
+    if (this.cache) this.cache.set(key, data);
+    return data;
+  }
+
+  /** Production staff (animation studio, director, music, …). */
+  async getSubjectPersons(subjectId, { useCache = true } = {}) {
+    const key = `persons:v2:${subjectId}`;
+    if (useCache && this.cache) {
+      const cached = this.cache.get(key);
+      if (Array.isArray(cached)) return cached;
+    }
+    const payload = await this.call(`/v0/subjects/${subjectId}/persons`);
+    const data = Array.isArray(payload) ? payload : payload?.data ?? [];
+    if (this.cache) this.cache.set(key, data);
+    return data;
+  }
+
+  /** A handful of short comments for the detail sidebar. */
+  async getSubjectComments(subjectId, { limit = 4, useCache = true } = {}) {
+    const key = `comments:v1:${subjectId}:${limit}`;
+    if (useCache && this.cache) {
+      const cached = this.cache.get(key);
+      if (Array.isArray(cached)) return cached;
+    }
+    const payload = await this.call(`/v0/subjects/${subjectId}/comments?limit=${limit}&offset=0`);
+    const data = Array.isArray(payload) ? payload : payload?.data ?? [];
+    if (this.cache) this.cache.set(key, data);
+    return data;
+  }
+
   /** Normalises a subject payload into the shape the database stores. */
   static normaliseSubject(subject) {
     const images = subject.images ?? {};

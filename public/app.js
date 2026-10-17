@@ -34,6 +34,8 @@ const state = {
   favType: 'all',
   calendar: { year: new Date().getFullYear(), month: new Date().getMonth(), selected: null },
   detail: null,
+  detailExtras: null,
+  detailExtrasError: null,
   detailTab: 'episodes',
   detailGroups: null,
   pendingCandidate: null,
@@ -1801,15 +1803,43 @@ async function loadSettings() {
 
 async function openDetail(seriesId) {
   state.matchSeriesId = null;
+  const previousId = state.detail?.series?.id ?? null;
   openOverlay('<div class="loading-panel"><span class="spinner"></span> 正在载入…</div>');
   state.detailTab = null;
   state.detailGroups = null;
   try {
     const data = await api(`/api/series/${seriesId}`);
     state.detail = data;
+    if (previousId !== data.series.id) state.detailExtras = null;
     renderDetail();
+    loadDetailExtras(data.series.id);
   } catch (error) {
     overlayPanel.innerHTML = `<div class="loading-panel">载入失败：${esc(error.message)}</div>`;
+  }
+}
+
+/** Rich Bangumi metadata is fetched after the detail shell is visible. */
+async function loadDetailExtras(seriesId) {
+  if (!state.detail || state.detail.series.id !== seriesId) return;
+  if (state.detailExtras !== null) {
+    renderDetailExtras();
+    return;
+  }
+  if (!state.detail.series.bangumi_id) {
+    state.detailExtras = { available: false, reason: 'unmatched' };
+    renderDetailExtras();
+    return;
+  }
+  renderDetailExtras();
+  try {
+    const data = await api(`/api/series/${seriesId}/extras`);
+    if (!state.detail || state.detail.series.id !== seriesId) return;
+    state.detailExtras = data;
+    renderDetailExtras();
+  } catch (error) {
+    if (!state.detail || state.detail.series.id !== seriesId) return;
+    state.detailExtras = { available: false, error: error.message };
+    renderDetailExtras();
   }
 }
 
@@ -1833,6 +1863,178 @@ const DETAIL_TABS = [
   { id: 'movies', label: '剧场版' },
   { id: 'missing', label: '未收录' },
 ];
+
+function extrasSkeleton() {
+  return `
+    <div class="meta-card meta-skeleton-card">
+      <span class="skeleton-line w40"></span>
+      <span class="skeleton-line w80 tall"></span>
+      <span class="skeleton-line w60"></span>
+    </div>
+    <div class="meta-card meta-skeleton-card">
+      <span class="skeleton-line w40"></span>
+      <span class="skeleton-line w80"></span>
+      <span class="skeleton-line w80"></span>
+    </div>`;
+}
+
+const formatCount = (value) => (Number.isFinite(Number(value)) ? Number(value).toLocaleString('zh-CN') : '—');
+
+function detailStatsMarkup(progress, extras) {
+  const rows = extras?.available
+    ? [
+        ['收藏', formatCount(extras.collection.collect)],
+        ['在看', formatCount(extras.collection.doing)],
+        ['想看', formatCount(extras.collection.wish)],
+      ]
+    : [
+        ['已看', progress.watched],
+        ['本地集数', progress.localTotal],
+        ['文件', progress.totalFiles ?? 0],
+      ];
+  return `<div class="detail-stats">${rows
+    .map(([label, value]) => `<div><strong>${value}</strong><span>${label}</span></div>`)
+    .join('')}</div>`;
+}
+
+function detailInfoMarkup(series, progress, extras) {
+  const aliases = (extras?.available ? extras.info.aliases : [])
+    .filter(Boolean)
+    .filter((alias) => alias !== series.title_cn);
+  const rows = [
+    ['放送开始', series.air_date || extras?.info?.airDate || '—'],
+    ['话数', series.eps_total ?? extras?.info?.eps ?? progress.localTotal],
+  ];
+  return `
+    <div class="detail-info">
+      ${rows
+        .map(([label, value]) => `<div class="info-row"><span>${label}</span><b>${esc(value ?? '—')}</b></div>`)
+        .join('')}
+      ${
+        aliases.length
+          ? `<div class="info-row"><span>别名</span><b>${esc(aliases.slice(0, 3).join(' / '))}</b></div>`
+          : ''
+      }
+    </div>`;
+}
+
+function detailTagsMarkup(extras, fallbackTags) {
+  const tags =
+    extras?.available && extras.tags.length ? extras.tags.slice(0, 10).map((tag) => tag.name) : fallbackTags;
+  return tags.map((tag) => `<span class="tag">${esc(tag)}</span>`).join('');
+}
+
+function ratingCard(extras) {
+  const { rating } = extras;
+  if (!rating?.score) return '';
+  const max = Math.max(1, ...rating.distribution.map((row) => row.count));
+  return `
+    <section class="meta-card">
+      <header class="meta-card-head">
+        <h3>评分</h3>
+        <span>${rating.rank ? `#${rating.rank}` : ''}</span>
+      </header>
+      <div class="rating-score">
+        <strong>${Number(rating.score).toFixed(1)}</strong>
+        <span>${rating.total ? `${formatCount(rating.total)} 人评分` : 'Bangumi 评分'}</span>
+      </div>
+      <div class="rating-bars">
+        ${rating.distribution
+          .map(
+            (row) =>
+              `<span class="rating-bar" title="${row.score} 分 · ${formatCount(row.count)} 人">
+                <i style="height:${Math.max(3, Math.round((row.count / max) * 100))}%"></i>
+                <b>${row.score}</b>
+              </span>`
+          )
+          .join('')}
+      </div>
+    </section>`;
+}
+
+function charactersCard(extras) {
+  const characters = extras.characters ?? [];
+  if (!characters.length) return '';
+  return `
+    <section class="meta-card">
+      <header class="meta-card-head"><h3>角色</h3><span>${characters.length}</span></header>
+      <div class="character-strip">
+        ${characters
+          .map(
+            (character) => `
+            <div class="character-item" title="${esc(character.name)}">
+              <span class="character-avatar">${
+                character.image
+                  ? `<img src="${esc(character.image)}" alt="" loading="lazy" referrerpolicy="no-referrer" />`
+                  : `<span>${esc(firstChar(character.name))}</span>`
+              }</span>
+              <strong>${esc(character.name)}</strong>
+              ${character.actors?.[0]?.name ? `<span>${esc(character.actors[0].name)}</span>` : ''}
+            </div>`
+          )
+          .join('')}
+      </div>
+    </section>`;
+}
+
+function staffCard(extras) {
+  const staff = (extras.staff ?? []).filter((person) => person.name);
+  if (!staff.length) return '';
+  return `
+    <section class="meta-card">
+      <header class="meta-card-head"><h3>制作人员</h3></header>
+      <div class="staff-list">
+        ${staff
+          .slice(0, 10)
+          .map(
+            (person) =>
+              `<div class="staff-row"><span>${esc(person.relation || '制作')}</span><strong>${esc(
+                person.name
+              )}</strong></div>`
+          )
+          .join('')}
+      </div>
+    </section>`;
+}
+
+function renderDetailExtras() {
+  const meta = $('detailMeta');
+  if (!meta || !state.detail) return;
+  const { series, progress, counts } = state.detail;
+  const extras = state.detailExtras;
+  const fallbackTags = tagsFor(series, counts);
+
+  const stats = $('detailStats');
+  if (stats) stats.innerHTML = detailStatsMarkup(progress, extras);
+  const info = $('detailInfo');
+  if (info) info.innerHTML = detailInfoMarkup(series, progress, extras);
+  const tagRow = $('detailTags');
+  if (tagRow) tagRow.innerHTML = detailTagsMarkup(extras, fallbackTags);
+
+  if (!extras) {
+    meta.innerHTML = extrasSkeleton();
+    return;
+  }
+  if (!extras.available) {
+    const message =
+      extras.reason === 'unmatched'
+        ? '匹配 Bangumi 之后，这里会显示评分分布、角色、制作人员和短评。'
+        : `无法读取 Bangumi 详情${extras.error ? `：${extras.error}` : '。'}`;
+    meta.innerHTML = `<div class="meta-empty">${icon('globe')}<p>${esc(message)}</p></div>`;
+    return;
+  }
+
+  meta.innerHTML = [ratingCard(extras), charactersCard(extras), staffCard(extras)]
+    .filter(Boolean)
+    .join('');
+}
+
+function setupSummary() {
+  const summary = $('detailSummary');
+  const button = document.querySelector('[data-action="toggle-summary"]');
+  if (!summary || !button) return;
+  button.hidden = summary.scrollHeight <= summary.clientHeight + 2;
+}
 
 function renderDetail() {
   const { series, progress, episodes, missing, extras, counts, sourceFolder } = state.detail;
@@ -1893,12 +2095,11 @@ function renderDetail() {
         </div>
       </header>
 
-      <div class="detail-body">
+      <div class="detail-body detail-body--rich">
         <aside class="detail-aside">
           <div class="detail-cover">${coverMarkup(series, 'detail-img')}</div>
           <h2 class="detail-title">${esc(series.title_cn ?? '未命名')}</h2>
           ${series.title_orig ? `<div class="detail-orig">${esc(series.title_orig)}</div>` : ''}
-          <div class="tag-row">${tags.map((tag) => `<span class="tag">${esc(tag)}</span>`).join('')}</div>
 
           <div class="detail-progress">
             <div class="detail-progress-head">
@@ -1908,7 +2109,9 @@ function renderDetail() {
             <span class="track"><i style="width:${Math.round(progress.percent * 100)}%"></i></span>
           </div>
 
-          ${series.summary ? `<p class="detail-summary">${esc(series.summary)}</p>` : ''}
+          <div id="detailStats">${detailStatsMarkup(progress, null)}</div>
+          <div id="detailInfo">${detailInfoMarkup(series, progress, null)}</div>
+          <div class="tag-row" id="detailTags">${detailTagsMarkup(null, tags)}</div>
 
           <div class="source-block">
             <div class="source-label">集号对应</div>
@@ -1928,21 +2131,34 @@ function renderDetail() {
           </div>
         </aside>
 
-        <section class="detail-episodes">
-          <div class="tabs">
-            ${tabs
-              .map(
-                (tab) =>
-                  `<button class="tab${tab.id === state.detailTab ? ' is-active' : ''}" type="button" data-action="tab" data-tab="${tab.id}">
-                    ${tab.label}<span class="tab-count">${tab.count}</span>
-                  </button>`
-              )
-              .join('')}
+        <section class="detail-main">
+          <div class="detail-summary-wrap">
+            <div class="detail-summary-head">简介</div>
+            <p class="detail-summary is-clamped" id="detailSummary">${esc(series.summary || '暂无简介')}</p>
+            <button class="text-btn" type="button" data-action="toggle-summary" hidden>显示更多</button>
           </div>
-          <div class="ep-scroll" id="epPane">${episodePaneContent()}</div>
+
+          <div class="detail-episodes">
+            <div class="tabs">
+              ${tabs
+                .map(
+                  (tab) =>
+                    `<button class="tab${tab.id === state.detailTab ? ' is-active' : ''}" type="button" data-action="tab" data-tab="${tab.id}">
+                      ${tab.label}<span class="tab-count">${tab.count}</span>
+                    </button>`
+                )
+                .join('')}
+            </div>
+            <div class="ep-scroll" id="epPane">${episodePaneContent()}</div>
+          </div>
         </section>
+
+        <aside class="detail-meta" id="detailMeta">${extrasSkeleton()}</aside>
       </div>
     </div>`;
+
+  renderDetailExtras();
+  setupSummary();
 }
 
 function episodePaneContent() {
@@ -2636,6 +2852,16 @@ document.addEventListener('click', async (event) => {
   if (action === 'tab') {
     const tab = target.closest('[data-tab]');
     if (tab) selectTab(tab.dataset.tab);
+    return undefined;
+  }
+
+  if (action === 'toggle-summary') {
+    const summary = $('detailSummary');
+    if (summary) {
+      const expanded = summary.classList.toggle('is-expanded');
+      summary.classList.toggle('is-clamped', !expanded);
+      target.closest('[data-action="toggle-summary"]').textContent = expanded ? '收起' : '显示更多';
+    }
     return undefined;
   }
 

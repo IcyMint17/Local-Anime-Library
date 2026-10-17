@@ -76,7 +76,7 @@ async function startHarness(options = {}) {
 }
 
 /** Minimal stand-in for BangumiClient so match tests stay offline. */
-function fakeClient({ subject, episodes }) {
+function fakeClient({ subject, episodes, characters = [], persons = [], comments = [] }) {
   return {
     proxy: null,
     userAgent: 'test',
@@ -86,6 +86,15 @@ function fakeClient({ subject, episodes }) {
     },
     async getEpisodes() {
       return episodes;
+    },
+    async getSubjectCharacters() {
+      return characters;
+    },
+    async getSubjectPersons() {
+      return persons;
+    },
+    async getSubjectComments() {
+      return comments;
     },
   };
 }
@@ -611,6 +620,78 @@ test('folders: POST /api/series/:id/reveal opens the folder that holds the files
 
   const unknown = await fetch(`${harness.base}/api/series/999999/reveal`, { method: 'POST' });
   assert.equal(unknown.status, 404);
+
+  await harness.close();
+});
+
+
+test('detail extras: rating distribution, characters, staff and comments are exposed', async () => {
+  const subject = {
+    id: 42,
+    name: 'Test Show',
+    name_cn: '测试番剧',
+    date: '2025-10-04',
+    eps: 12,
+    rating: { score: 7.6, rank: 1234, total: 5600, count: { 1: 1, 7: 900, 8: 3000, 10: 5 } },
+    collection: { wish: 100, collect: 2000, doing: 300, on_hold: 10, dropped: 4 },
+    tags: [{ name: 'TV', count: 99 }, { name: '科幻', count: 40 }],
+    infobox: [
+      { key: '别名', value: 'Test Alias' },
+      { key: '动画制作', value: 'Test Studio' },
+      { key: '导演', value: 'Test Director' },
+    ],
+  };
+  const harness = await startHarness({
+    client: fakeClient({
+      subject,
+      episodes: [],
+      characters: [
+        {
+          id: 1,
+          name: '角色 A',
+          relation: '主角',
+          images: { small: 'https://example.test/a.jpg' },
+          actors: [{ name: '声优 A', images: { small: 'https://example.test/va.jpg' } }],
+        },
+      ],
+      persons: [{ id: 9, name: 'Passione', relation: '动画制作', images: {} }],
+      comments: [{ id: 3, user: { nickname: '用户 A' }, score: 8, comment: '很好看' }],
+    }),
+  });
+  const seriesId = insertSeries(harness.db, {
+    local_key: 'a|extras|1',
+    source_folder: 'Extras',
+    title_cn: '测试番剧',
+    bangumi_id: 42,
+    media_kind: 'episode',
+    match_state: 'manual',
+  });
+
+  const response = await fetch(`${harness.base}/api/series/${seriesId}/extras`);
+  const body = await response.json();
+  assert.equal(body.available, true);
+  assert.equal(body.rating.score, 7.6);
+  assert.equal(body.rating.distribution.length, 10);
+  assert.equal(body.rating.distribution.find((row) => row.score === 8).count, 3000);
+  assert.equal(body.collection.collect, 2000);
+  assert.deepEqual(body.tags[0], { name: 'TV', count: 99 });
+  assert.deepEqual(body.info.aliases, ['Test Alias']);
+  assert.equal(body.characters[0].name, '角色 A');
+  assert.equal(body.characters[0].actors[0].name, '声优 A');
+  assert.equal(body.characters[0].image, 'https://example.test/a.jpg');
+  assert.equal(body.staff[0].relation, '动画制作');
+  assert.equal(body.staff[0].name, 'Test Studio');
+  assert.equal(body.staff[1].relation, '导演');
+
+  // Unmatched series simply has no Bangumi extras.
+  const unmatchedId = insertSeries(harness.db, {
+    local_key: 'a|extras|2',
+    source_folder: 'Unmatched',
+    title_cn: '未匹配',
+  });
+  const unmatched = await (await fetch(`${harness.base}/api/series/${unmatchedId}/extras`)).json();
+  assert.equal(unmatched.available, false);
+  assert.equal(unmatched.reason, 'unmatched');
 
   await harness.close();
 });

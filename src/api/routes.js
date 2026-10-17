@@ -12,7 +12,7 @@ import { applyAutoOffset, mappingState, matchLocalToBangumi } from '../library/m
 import { isValidOffset, MAX_OFFSET } from '../library/offset.js';
 import { syncEpisodes, reclassifyFromBangumi } from '../library/parts.js';
 import { EPISODE_KEY, SPECIAL_KEY, MOVIE_KEY, itemKeyFor } from '../library/items.js';
-import { isMainEpisodeType } from '../meta/bangumi.js';
+import { isMainEpisodeType, BangumiClient } from '../meta/bangumi.js';
 
 export { EPISODE_KEY, SPECIAL_KEY, MOVIE_KEY, itemKeyFor };
 
@@ -363,6 +363,127 @@ export function createRoutes({
       },
       sourceFolder: series.source_folder,
     };
+  });
+
+
+  /**
+   * Rich Bangumi metadata for the detail sidebar: rating distribution,
+   * collection counts, tags, characters, staff and a few short comments.
+   *
+   * This is a separate endpoint because it needs four rate-limited API calls;
+   * the detail response itself must stay instant. Results are cached in the
+   * same meta cache as everything else, so repeat opens are free.
+   */
+  add('GET', '/api/series/:id/extras', async (params) => {
+    const series = repo.getSeries(db, Number(params.id));
+    if (!series) return { status: 404, body: { error: 'not found' } };
+    if (!series.bangumi_id) return { available: false, reason: 'unmatched' };
+
+    const cacheKey = `subject-extras:v1:${series.bangumi_id}`;
+    const cached = repo.getCache(db, cacheKey);
+    if (cached?.value) return cached.value;
+
+    const subjectId = series.bangumi_id;
+    const results = await Promise.allSettled([
+      client.getSubject(subjectId, { useCache: true }),
+      client.getSubjectCharacters(subjectId),
+      client.getSubjectPersons(subjectId),
+    ]);
+    if (results[0].status !== 'fulfilled') {
+      return { available: false, error: results[0].reason?.message ?? '无法获取 Bangumi 详情' };
+    }
+
+    const subject = results[0].value ?? {};
+    const characters = results[1].status === 'fulfilled' ? results[1].value ?? [] : [];
+    const persons = results[2].status === 'fulfilled' ? results[2].value ?? [] : [];
+    const ratingCounts = subject.rating?.count ?? {};
+
+    // The infobox carries the production credits in a stable, human-readable
+    // order; the persons endpoint is only a fallback for subjects that lack it.
+    const infobox = Array.isArray(subject.infobox) ? subject.infobox : [];
+    const infoboxValue = (value) =>
+      Array.isArray(value)
+        ? value.map((entry) => (typeof entry === 'object' ? entry?.v : entry)).filter(Boolean).join(' / ')
+        : String(value ?? '').trim();
+    const CREDITS = [
+      ['动画制作', /^动画制作$/],
+      ['制作', /^(制作|製作)$/],
+      ['导演', /^(导演|监督)$/],
+      ['原作', /^原作$/],
+      ['音乐', /^(音乐|音楽)$/],
+      ['系列构成', /^系列构成$/],
+      ['人物设定', /^(人物设定|角色设计)$/],
+      ['美术监督', /^美术监督$/],
+      ['色彩设计', /^(色彩设计|色彩指定)$/],
+      ['摄影监督', /^摄影监督$/],
+      ['音响监督', /^(音响监督|音响)$/],
+      ['剪辑', /^剪辑$/],
+    ];
+    const staff = [];
+    for (const [label, pattern] of CREDITS) {
+      const item = infobox.find((entry) => pattern.test(String(entry?.key ?? '')));
+      const value = item ? infoboxValue(item.value) : '';
+      if (value) staff.push({ id: null, name: value, relation: label, image: null });
+    }
+    if (staff.length === 0) {
+      const seen = new Set();
+      for (const person of persons) {
+        if (!person?.name || seen.has(person.id)) continue;
+        seen.add(person.id);
+        staff.push({
+          id: person.id,
+          name: person.name,
+          relation: person.relation ?? '制作',
+          image: person.image ?? person.images?.small ?? person.images?.grid ?? null,
+        });
+      }
+    }
+
+    const payload = {
+      available: true,
+      rating: {
+        score: subject.rating?.score ?? null,
+        rank: subject.rating?.rank ?? null,
+        total: subject.rating?.total ?? null,
+        distribution: Array.from({ length: 10 }, (_, index) => ({
+          score: index + 1,
+          count: Number(ratingCounts[String(index + 1)] ?? 0),
+        })),
+      },
+      collection: {
+        wish: Number(subject.collection?.wish ?? 0),
+        collect: Number(subject.collection?.collect ?? 0),
+        doing: Number(subject.collection?.doing ?? 0),
+        onHold: Number(subject.collection?.on_hold ?? 0),
+        dropped: Number(subject.collection?.dropped ?? 0),
+      },
+      tags: Array.isArray(subject.tags)
+        ? subject.tags.slice(0, 12).map((tag) => ({ name: tag.name, count: tag.count ?? 0 }))
+        : [],
+      info: {
+        airDate: subject.date ?? null,
+        eps: subject.eps ?? null,
+        platform: subject.platform ?? null,
+        aliases: BangumiClient.extractAliases(subject),
+      },
+      characters: characters.slice(0, 12).map((character) => ({
+        id: character.id,
+        name: character.name ?? '',
+        relation: character.relation ?? '',
+        image: character.image ?? character.images?.small ?? character.images?.grid ?? character.images?.medium ?? null,
+        actors: (character.actors ?? []).map((actor) => ({
+          name: actor.name ?? '',
+          image: actor.image ?? actor.images?.small ?? actor.images?.grid ?? null,
+        })),
+      })),
+      staff: staff.slice(0, 12),
+    };
+
+    // A partial failure is not cached, so the next open can fill the gaps.
+    if (results.every((result) => result.status === 'fulfilled')) {
+      repo.setCache(db, cacheKey, payload);
+    }
+    return payload;
   });
 
   /* ---------------------------------------------------------- watch state */
