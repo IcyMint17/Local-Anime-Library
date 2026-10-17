@@ -87,6 +87,8 @@ export const DEFAULT_CONFIG = {
     dock: 'bottom',
     // Backdrop blur in px for every glass panel (the liquid-glass slider).
     glass: 26,
+    // Desktop shell: use the GPU for compositing/rasterization.
+    gpuAcceleration: true,
     sidebarCollapsed: false,
   },
 };

@@ -21,6 +21,7 @@ const state = {
   mode: 'dark',
   dock: 'bottom',
   glass: 26,
+  gpuAcceleration: true,
   additionsExpanded: false,
   // library filters
   filter: 'all',
@@ -372,6 +373,7 @@ async function loadPreferences() {
     applyMode(preferences.mode);
     if (preferences.dock) applyDock(preferences.dock);
     if (Number.isFinite(Number(preferences.glass))) applyGlass(preferences.glass);
+    if (typeof preferences.gpuAcceleration === 'boolean') state.gpuAcceleration = preferences.gpuAcceleration;
     if (state.page === 'settings') renderSettingsBody();
   } catch {
     /* localStorage is a good enough fallback */
@@ -1442,6 +1444,38 @@ function renderSettingsBody() {
   bindSettings();
   renderScanStatus();
   refreshCacheInfo();
+  refreshGpuInfo();
+}
+
+function gpuStateText(value) {
+  const text = String(value ?? '');
+  if (text.startsWith('enabled')) return '已启用';
+  if (text.includes('software')) return '软件渲染';
+  if (text.startsWith('disabled')) return '已关闭';
+  return text || '未知';
+}
+
+async function refreshGpuInfo() {
+  const node = $('gpuStatus');
+  if (!node || !window.desktopWindow?.gpuInfo) return;
+  try {
+    const info = await window.desktopWindow.gpuInfo();
+    const active = info.devices?.find((device) => device.active)?.name;
+    const software = String(info.compositing ?? '').includes('software');
+    const parts = [
+      info.enabled
+        ? software
+          ? 'GPU 加速已开启，但 Chromium 回退到软件合成'
+          : 'GPU 加速已开启'
+        : 'GPU 加速已关闭',
+      `合成 ${gpuStateText(info.compositing)}`,
+      `光栅化 ${gpuStateText(info.rasterization)}`,
+    ];
+    if (active) parts.push(active);
+    node.textContent = parts.join(' · ');
+  } catch (error) {
+    node.textContent = `无法读取 GPU 状态：${error.message}`;
+  }
 }
 
 async function refreshCacheInfo() {
@@ -1683,6 +1717,20 @@ function advancedPanel() {
           <button class="btn btn-ghost" type="button" data-setting="reset-prefs">恢复默认外观</button>
         </div>
       </section>
+      ${window.desktopWindow?.gpuInfo
+        ? `<section class="setting-group">
+        <div class="setting-row setting-row--switch">
+          <div class="setting-copy">
+            <div class="setting-label">GPU 加速</div>
+            <p class="setting-hint">用显卡合成页面动画、滚动和玻璃模糊；关闭后改用软件渲染。</p>
+          </div>
+          <button class="switch${state.gpuAcceleration ? ' is-on' : ''}" type="button" role="switch"
+            aria-checked="${state.gpuAcceleration}" aria-label="GPU 加速" data-setting="toggle-gpu"><span></span></button>
+        </div>
+        <p class="setting-hint" id="gpuStatus">正在读取 GPU 状态…</p>
+        <p class="setting-hint">修改后需要重启应用生效。若状态显示「软件渲染」，可尝试更新显卡驱动。</p>
+      </section>`
+        : ''}
       <section class="setting-group">
         <div class="setting-label">桌面版缓存</div>
         ${
@@ -3169,6 +3217,18 @@ document.addEventListener('click', async (event) => {
       toast('网络设置已保存（代理改动需要重启程序）');
     } catch (error) {
       toast(`保存失败：${error.message}`, true);
+    }
+    return undefined;
+  }
+  if (setting === 'toggle-gpu') {
+    const next = !state.gpuAcceleration;
+    try {
+      await api('/api/preferences', { method: 'POST', body: { gpuAcceleration: next } });
+      state.gpuAcceleration = next;
+      renderSettingsBody();
+      toast(next ? 'GPU 加速已开启，重启应用后生效' : 'GPU 加速已关闭，重启应用后生效');
+    } catch (error) {
+      toast(`保存 GPU 设置失败：${error.message}`, true);
     }
     return undefined;
   }

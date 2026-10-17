@@ -455,6 +455,7 @@ test('preferences: theme, dock, glass and sidebar survive a port change', async 
   assert.equal(initial.theme, null);
   assert.equal(initial.dock, 'bottom');
   assert.equal(initial.glass, 26);
+  assert.equal(initial.gpuAcceleration, true);
 
   const saved = await (
     await fetch(`${harness.base}/api/preferences`, {
@@ -465,6 +466,7 @@ test('preferences: theme, dock, glass and sidebar survive a port change', async 
         mode: 'light',
         dock: 'left',
         glass: 18,
+        gpuAcceleration: false,
         sidebarCollapsed: true,
       }),
     })
@@ -476,6 +478,7 @@ test('preferences: theme, dock, glass and sidebar survive a port change', async 
   assert.equal(stored.mode, 'light');
   assert.equal(stored.dock, 'left');
   assert.equal(stored.glass, 18);
+  assert.equal(stored.gpuAcceleration, false);
   assert.equal(stored.sidebarCollapsed, true);
 
   // A partial update must leave the other preferences alone.

@@ -36,7 +36,6 @@ app.setName('AnimeLibrary');
  * with zero files touched. The README has the details.
  */
 app.commandLine.appendSwitch('disable-http-cache');
-app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
 app.commandLine.appendSwitch('disable-background-networking');
 app.commandLine.appendSwitch('disable-component-update');
 app.commandLine.appendSwitch('disable-domain-reliability');
@@ -54,6 +53,29 @@ process.env.ANIME_LIBRARY_DATA = dataDir;
 process.env.ANIME_LIBRARY_CONFIG = configPath;
 fs.mkdirSync(dataDir, { recursive: true });
 
+// Read the GPU preference before app.whenReady: disableHardwareAcceleration()
+// only has an effect during startup. Missing/invalid config means "on".
+let gpuAcceleration = true;
+try {
+  const saved = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  if (saved?.ui?.gpuAcceleration === false) gpuAcceleration = false;
+} catch {
+  /* first run or an unreadable config: use the default */
+}
+
+if (gpuAcceleration) {
+  // Chromium may fall back to software compositing for a driver it does not
+  // recognise. These switches keep the UI's backdrop blurs and page transitions
+  // on the GPU, which is where the liquid-glass effects are cheap.
+  app.commandLine.appendSwitch('ignore-gpu-blocklist');
+  app.commandLine.appendSwitch('enable-gpu-rasterization');
+  app.commandLine.appendSwitch('enable-zero-copy');
+  app.commandLine.appendSwitch('enable-accelerated-2d-canvas');
+  app.commandLine.appendSwitch('enable-smooth-scrolling');
+} else {
+  app.disableHardwareAcceleration();
+}
+
 /**
  * Start from an empty cache.
  *
@@ -65,7 +87,9 @@ fs.mkdirSync(dataDir, { recursive: true });
  * up whatever an earlier version left behind.
  */
 if (process.env.ANIME_LIBRARY_KEEP_CACHE !== '1') {
-  const swept = clearProfileCachesSync(app.getPath('userData'));
+  // Keep shader caches while acceleration is on; clearing them on every launch
+  // makes the first page transition recompile its shaders.
+  const swept = clearProfileCachesSync(app.getPath('userData'), { keepGpu: gpuAcceleration });
   if (swept.before > 0) {
     fs.appendFileSync(
       logPath,
@@ -90,6 +114,7 @@ function log(message) {
 }
 
 log(`启动 v${app.getVersion()} · Electron ${process.versions.electron} · Node ${process.versions.node}`);
+log(`GPU 加速: ${gpuAcceleration ? '开启' : '关闭（设置里已禁用）'}`);
 log(`appRoot = ${appRoot}`);
 log(`dataDir = ${dataDir}`);
 
@@ -145,6 +170,28 @@ ipcMain.on('window:menu', () => {
   if (menu) menu.popup({ window: mainWindow ?? undefined });
 });
 ipcMain.handle('window:get-state', () => ({ maximized: Boolean(mainWindow?.isMaximized()) }));
+
+/** Actual GPU state, shown in Settings → Advanced. */
+ipcMain.handle('gpu:info', async () => {
+  const status = app.getGPUFeatureStatus?.() ?? {};
+  let devices = [];
+  try {
+    const info = await app.getGPUInfo('basic');
+    devices = (info.gpuDevice ?? []).map((device) => ({
+      name: device.deviceString,
+      active: Boolean(device.active),
+    }));
+  } catch {
+    /* the status strings below are still useful without the device list */
+  }
+  return {
+    enabled: app.isHardwareAccelerationEnabled?.() ?? true,
+    compositing: status.gpu_compositing ?? 'unknown',
+    rasterization: status.rasterization ?? 'unknown',
+    webgl: status.webgl ?? 'unknown',
+    devices,
+  };
+});
 
 /** Cache size / cleanup for the Settings page. */
 ipcMain.handle('cache:info', () => {
@@ -313,6 +360,12 @@ async function boot() {
   handle = await startLibraryApp({ port: 0, dataDir, logger: console });
   log(`服务已启动: ${handle.url}`);
   log(`数据目录: ${dataDir}`);
+  try {
+    const status = app.getGPUFeatureStatus();
+    log(`GPU 状态: 合成 ${status.gpu_compositing}, 光栅化 ${status.rasterization}, WebGL ${status.webgl}`);
+  } catch {
+    /* status is diagnostic only */
+  }
   buildMenu();
   createWindow(handle.url);
 }

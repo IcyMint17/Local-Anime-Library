@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('desktopWindow', {
   openMenu: () => ipcRenderer.send('window:menu'),
   getState: () => ipcRenderer.invoke('window:get-state'),
   cacheInfo: () => ipcRenderer.invoke('cache:info'),
+  gpuInfo: () => ipcRenderer.invoke('gpu:info'),
   clearCache: () => ipcRenderer.invoke('cache:clear'),
   onStateChange: (listener) => {
     const handler = (_event, state) => listener(state);

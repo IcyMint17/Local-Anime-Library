@@ -824,6 +824,7 @@ export function createRoutes({
       mode: ui.mode === 'light' ? 'light' : 'dark',
       dock: ['left', 'right'].includes(ui.dock) ? ui.dock : 'bottom',
       glass: Number.isFinite(Number(ui.glass)) ? Math.max(0, Math.min(48, Number(ui.glass))) : 26,
+      gpuAcceleration: ui.gpuAcceleration !== false,
       sidebarCollapsed: Boolean(ui.sidebarCollapsed),
     };
   });
@@ -850,6 +851,7 @@ export function createRoutes({
     if (Number.isFinite(Number(body.glass))) {
       ui.glass = Math.max(0, Math.min(48, Number(body.glass)));
     }
+    if (typeof body.gpuAcceleration === 'boolean') ui.gpuAcceleration = body.gpuAcceleration;
     if (typeof body.sidebarCollapsed === 'boolean') ui.sidebarCollapsed = body.sidebarCollapsed;
 
     config.ui = ui;

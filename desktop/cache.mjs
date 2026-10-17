@@ -30,6 +30,17 @@ export const CACHE_DIRS = [
   'Shared Dictionary',
 ];
 
+/** GPU shader caches are warm state, not junk: keeping them avoids a
+ * first-seconds shader compile when hardware acceleration is on. */
+export const GPU_CACHE_DIRS = [
+  'GPUCache',
+  'ShaderCache',
+  'GrShaderCache',
+  'DawnGraphiteCache',
+  'DawnWebGPUCache',
+  'GPUPersistentCache',
+];
+
 /** Cache files that live directly in the profile root. */
 export const CACHE_FILES = [
   'DIPS-wal',
@@ -83,12 +94,16 @@ export function cacheBytes(userData) {
  *
  * @returns {{before:number, after:number, removed:string[], skipped:string[]}}
  */
-export function clearProfileCachesSync(userData) {
-  const before = cacheBytes(userData);
+export function clearProfileCachesSync(userData, { keepGpu = false } = {}) {
+  const gpuNames = new Set(GPU_CACHE_DIRS);
+  const targets = entryPaths(userData).filter(
+    (target) => !keepGpu || !gpuNames.has(path.basename(target))
+  );
+  const before = targets.reduce((total, target) => total + sizeOf(target), 0);
 
   const removed = [];
   const skipped = [];
-  for (const target of entryPaths(userData)) {
+  for (const target of targets) {
     if (!fs.existsSync(target)) continue;
     try {
       // Deliberately *not* `force: true`: that makes Node swallow permission
@@ -102,7 +117,8 @@ export function clearProfileCachesSync(userData) {
     }
   }
 
-  return { before, after: cacheBytes(userData), removed, skipped };
+  const after = targets.reduce((total, target) => total + sizeOf(target), 0);
+  return { before, after, removed, skipped };
 }
 
 /**
