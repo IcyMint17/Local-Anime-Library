@@ -98,7 +98,7 @@ const ICONS = {
 
 const icon = (name, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] ?? ''}</svg>`;
 const WINDOW_ICONS = {
-  menu: '<circle cx="8" cy="3.6" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="12.4" r="1.5" fill="currentColor" stroke="none"/>',
+  menu: '<circle cx="3.2" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none"/><circle cx="12.8" cy="8" r="1.3" fill="currentColor" stroke="none"/>',
   minimize: '<path d="M3 8h10"/>',
   maximize: '<rect x="3.3" y="3.3" width="9.4" height="9.4" rx="1.2"/>',
   restore:
