@@ -166,6 +166,21 @@ export function listEpisodes(db, seriesId) {
   return db.prepare('SELECT * FROM episodes WHERE series_id = ? ORDER BY sort').all(seriesId);
 }
 
+/** Removes episode rows that belong to a Bangumi part no longer attached. */
+export function pruneEpisodes(db, seriesId, keepBangumiIds) {
+  const keep = new Set([...keepBangumiIds].map(Number));
+  const rows = db.prepare('SELECT DISTINCT bangumi_id FROM episodes WHERE series_id = ?').all(seriesId);
+  let removed = 0;
+  for (const row of rows) {
+    if (keep.has(Number(row.bangumi_id))) continue;
+    removed += Number(
+      db.prepare('DELETE FROM episodes WHERE series_id = ? AND bangumi_id = ?').run(seriesId, row.bangumi_id)
+        .changes
+    );
+  }
+  return removed;
+}
+
 /** Replaces the recorded list of Bangumi parts a folder covers. */
 export function replaceSeriesSubjects(db, seriesId, subjects) {
   db.prepare('DELETE FROM series_subjects WHERE series_id = ?').run(seriesId);

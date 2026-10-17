@@ -11,10 +11,20 @@ import {
   upsertFile,
   listFiles,
   replaceEpisodes,
+  replaceSeriesSubjects,
+  getSeries,
   listEpisodes,
   listSeriesSubjects,
 } from '../src/db/repo.js';
-import { syncEpisodes, reclassifyFromBangumi, uncoveredNumbers, allLocalNumbers } from '../src/library/parts.js';
+import {
+  syncEpisodes,
+  reclassifyFromBangumi,
+  uncoveredNumbers,
+  allLocalNumbers,
+  sameFranchise,
+  sanitizeSeriesParts,
+  recalcAutoOffset,
+} from '../src/library/parts.js';
 import { computeProgress } from '../src/library/progress.js';
 
 function freshDatabase() {
@@ -209,4 +219,135 @@ test('allLocalNumbers includes files already classified as extras', () => {
   addEpisodes(db, seriesId, [1, 2, 24], { 24: 'special' });
   assert.deepEqual(allLocalNumbers(db, seriesId).sort((a, b) => a - b), [1, 2, 24]);
   db.close();
+});
+
+
+test('sameFranchise rejects a neighbouring show with similar episode numbers', () => {
+  const series = { title_cn: '间谍过家家 第三季', title_orig: 'SPY×FAMILY Season 3', source_folder: 'SPY' };
+  assert.equal(sameFranchise(series, { title_cn: '小林家的龙女仆 怕寂寞的龙' }), false);
+  assert.equal(sameFranchise(series, { title_cn: '间谍过家家' }), true);
+  assert.equal(
+    sameFranchise(
+      { title_cn: 'Re：从零开始的异世界生活 第三季 袭击篇', source_folder: 'ReZero' },
+      { title_cn: 'Re：从零开始的异世界生活' }
+    ),
+    true
+  );
+});
+
+test('sanitizeSeriesParts removes a contaminated part and its episodes', () => {
+  const { db } = freshDatabase();
+  const seriesId = insertSeries(db, {
+    local_key: 'a|sanitize|1',
+    source_folder: 'SPY',
+    title_cn: '间谍过家家 第三季',
+    bangumi_id: 498378,
+    match_state: 'manual',
+  });
+  replaceSeriesSubjects(db, seriesId, [
+    { id: 498378, name_cn: '间谍过家家 第三季', primary: true },
+    { id: 514353, name_cn: '小林家的龙女仆 怕寂寞的龙', primary: false },
+  ]);
+  replaceEpisodes(db, seriesId, [
+    { ...episode(38, 0, 'ep 38'), bangumi_id: 498378 },
+    { ...episode(39, 0, 'ep 39'), bangumi_id: 498378 },
+    { ...episode(1, 0, 'wrong show'), bangumi_id: 514353 },
+  ]);
+  updateSeries(db, seriesId, { eps_total: 3 });
+
+  const removed = sanitizeSeriesParts(db, getSeries(db, seriesId));
+  assert.equal(removed, 1);
+  assert.deepEqual(
+    listSeriesSubjects(db, seriesId).map((part) => part.bangumi_id),
+    [498378]
+  );
+  assert.deepEqual(
+    listEpisodes(db, seriesId).map((row) => row.bangumi_id),
+    [498378, 498378]
+  );
+  assert.equal(getSeries(db, seriesId).eps_total, 2);
+});
+
+
+test('syncEpisodes drops a stored part from another franchise', async () => {
+  const { db } = freshDatabase();
+  const seriesId = insertSeries(db, {
+    local_key: 'a|sync|clean',
+    source_folder: 'Show A',
+    title_cn: 'Show A',
+    bangumi_id: 1,
+    match_state: 'manual',
+  });
+  addEpisodes(db, seriesId, Array.from({ length: 12 }, (_, index) => index + 1));
+  replaceSeriesSubjects(db, seriesId, [
+    { id: 1, name_cn: 'Show A', primary: true },
+    { id: 2, name_cn: 'Other Show', primary: false },
+  ]);
+  const client = fakeClient({
+    1: { subject: { id: 1, name_cn: 'Show A', name: 'Show A' }, episodes: Array.from({ length: 12 }, (_, index) => episode(index + 1)) },
+    2: { subject: { id: 2, name_cn: 'Other Show', name: 'Other Show' }, episodes: Array.from({ length: 12 }, (_, index) => episode(index + 1)) },
+  });
+
+  const series = getSeries(db, seriesId);
+  await syncEpisodes({ db, client, series, query: 'Show A', logger: { warn() {} } });
+
+  assert.deepEqual(
+    listSeriesSubjects(db, seriesId).map((part) => part.bangumi_id),
+    [1]
+  );
+  assert.ok(listEpisodes(db, seriesId).every((row) => row.bangumi_id === 1));
+});
+
+
+test('sanitizeSeriesParts keeps a same-franchise part only when its range touches', () => {
+  const { db } = freshDatabase();
+  const seriesId = insertSeries(db, {
+    local_key: 'a|sanitize|range',
+    source_folder: 'ReZero',
+    title_cn: 'Re：从零开始的异世界生活 第三季 袭击篇',
+    bangumi_id: 425998,
+    ep_offset: 50,
+    match_state: 'manual',
+  });
+  addEpisodes(db, seriesId, Array.from({ length: 16 }, (_, index) => index + 1));
+  updateSeries(db, seriesId, { ep_offset: 50 });
+  replaceSeriesSubjects(db, seriesId, [
+    { id: 425998, name_cn: 'Re：从零开始的异世界生活 第三季 袭击篇', primary: true },
+    { id: 510728, name_cn: 'Re：从零开始的异世界生活 第三季 反击篇', primary: false },
+    { id: 140001, name_cn: 'Re：从零开始的异世界生活', primary: false },
+  ]);
+  replaceEpisodes(db, seriesId, [
+    ...Array.from({ length: 8 }, (_, index) => ({ ...episode(51 + index), bangumi_id: 425998 })),
+    ...Array.from({ length: 8 }, (_, index) => ({ ...episode(59 + index), bangumi_id: 510728 })),
+    ...Array.from({ length: 26 }, (_, index) => ({ ...episode(index), bangumi_id: 140001 })),
+  ]);
+
+  const removed = sanitizeSeriesParts(db, getSeries(db, seriesId));
+  assert.equal(removed, 1);
+  assert.deepEqual(
+    listSeriesSubjects(db, seriesId).map((part) => part.bangumi_id).sort(),
+    [425998, 510728]
+  );
+  assert.ok(!listEpisodes(db, seriesId).some((row) => row.bangumi_id === 140001));
+});
+
+
+test('recalcAutoOffset repairs a stale offset after pruning', () => {
+  const { db } = freshDatabase();
+  const seriesId = insertSeries(db, {
+    local_key: 'a|offset|repair',
+    source_folder: 'ReZero',
+    title_cn: 'Re：从零开始的异世界生活 第三季 袭击篇',
+    bangumi_id: 425998,
+    match_state: 'manual',
+  });
+  addEpisodes(db, seriesId, Array.from({ length: 14 }, (_, index) => index + 1));
+  replaceEpisodes(db, seriesId, [
+    ...Array.from({ length: 8 }, (_, index) => ({ ...episode(51 + index), bangumi_id: 425998 })),
+    ...Array.from({ length: 8 }, (_, index) => ({ ...episode(59 + index), bangumi_id: 510728 })),
+  ]);
+  updateSeries(db, seriesId, { ep_offset: 0, ep_offset_auto: 1 });
+
+  assert.equal(recalcAutoOffset(db, getSeries(db, seriesId)), true);
+  assert.equal(getSeries(db, seriesId).ep_offset, 50);
 });

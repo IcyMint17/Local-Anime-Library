@@ -8,6 +8,149 @@ import * as repo from '../db/repo.js';
 import { detectEpisodeOffset } from './offset.js';
 import { matchLocalToBangumi } from './mapping.js';
 import { isMainEpisodeType } from '../meta/bangumi.js';
+import { similarity } from '../scan/parse.js';
+
+/**
+ * A sibling part is only legitimate when its title still belongs to the same
+ * franchise as the folder. Without this check a search hit that merely fills
+ * missing episode numbers (the next show in the library, for example) would be
+ * merged in and its episodes would show up as "未收录".
+ */
+export function sameFranchise(series, candidate, threshold = 0.55) {
+  const local = [series.title_cn, series.title_orig, series.source_folder].filter(Boolean);
+  const remote = [
+    candidate.title_cn ?? candidate.name_cn,
+    candidate.title_orig ?? candidate.name,
+  ].filter(Boolean);
+  if (local.length === 0) return true;
+  if (remote.length === 0) return false;
+  let best = 0;
+  for (const left of local) {
+    for (const right of remote) best = Math.max(best, similarity(left, right));
+  }
+  return best >= threshold;
+}
+
+/**
+ * Drops parts that were attached by an older, too-eager sibling merge. Called
+ * at startup and before a sync, so the contaminated rows disappear from
+ * existing databases without requiring a manual rescan.
+ */
+export function sanitizeSeriesParts(db, series) {
+  const parts = repo.listSeriesSubjects(db, series.id);
+  if (parts.length === 0) return 0;
+
+  // Two guards: the title must belong to the same franchise, and the episode
+  // range must touch what is already attached. The second one is what stops an
+  // earlier season (0..25) from being merged into a folder numbered 51..66.
+  const ranges = new Map();
+  const numbersByPart = new Map();
+  for (const episode of repo.listEpisodes(db, series.id)) {
+    if (!Number.isFinite(Number(episode.number))) continue;
+    const key = Number(episode.bangumi_id);
+    const range = ranges.get(key) ?? { min: Infinity, max: -Infinity };
+    range.min = Math.min(range.min, Number(episode.number));
+    range.max = Math.max(range.max, Number(episode.number));
+    ranges.set(key, range);
+    if (!numbersByPart.has(key)) numbersByPart.set(key, new Set());
+    numbersByPart.get(key).add(Number(episode.number));
+  }
+
+  // A sibling part is only worth keeping when at least one local file actually
+  // lands on one of its episodes. Same-franchise seasons that merely sit next
+  // to the primary range are still dropped if the folder never references them.
+  const offset = Number(series.ep_offset ?? 0) || 0;
+  const wanted = new Set(
+    repo
+      .listFiles(db, series.id)
+      .filter((file) => file.kind === 'episode' && file.ep_number != null)
+      .map((file) => Number(file.ep_number) + offset)
+  );
+
+  const primaryPart = parts.find((part) => part.bangumi_id === series.bangumi_id);
+  const valid = [];
+  const validIds = new Set();
+  const keptNumbers = new Set(numbersByPart.get(series.bangumi_id) ?? []);
+  let union = ranges.get(series.bangumi_id) ?? null;
+  if (primaryPart) {
+    valid.push(primaryPart);
+    validIds.add(primaryPart.bangumi_id);
+  }
+
+  const candidates = parts
+    .filter((part) => part.bangumi_id !== series.bangumi_id)
+    .filter((part) => sameFranchise(series, part))
+    .sort((a, b) => (ranges.get(a.bangumi_id)?.min ?? Infinity) - (ranges.get(b.bangumi_id)?.min ?? Infinity));
+
+  for (const part of candidates) {
+    const range = ranges.get(part.bangumi_id);
+    const numbers = numbersByPart.get(part.bangumi_id);
+    if (!range || !numbers) continue;
+    if (union && (range.min > union.max + 2 || range.max < union.min - 2)) continue;
+    if ([...numbers].filter((number) => keptNumbers.has(number)).length > 1) continue;
+    if (![...numbers].some((number) => wanted.has(number))) continue;
+    valid.push(part);
+    validIds.add(part.bangumi_id);
+    for (const number of numbers) keptNumbers.add(number);
+    union = union
+      ? { min: Math.min(union.min, range.min), max: Math.max(union.max, range.max) }
+      : { ...range };
+  }
+
+  const staleEpisodes = [...ranges.keys()].some((id) => !validIds.has(id));
+  if (valid.length === parts.length && !staleEpisodes) return 0;
+
+  repo.replaceSeriesSubjects(
+    db,
+    series.id,
+    valid.map((part) => ({
+      id: part.bangumi_id,
+      name_cn: part.title_cn,
+      name: part.title_orig,
+      primary: part.bangumi_id === series.bangumi_id,
+    }))
+  );
+  const keep = new Set(validIds);
+  keep.add(series.bangumi_id);
+  repo.pruneEpisodes(db, series.id, keep);
+  const total = repo
+    .listEpisodes(db, series.id)
+    .filter((episode) => isMainEpisodeType(episode.type)).length;
+  if (total > 0) repo.updateSeries(db, series.id, { eps_total: total });
+  return parts.length - valid.length;
+}
+
+/**
+ * Recomputes the local↔Bangumi offset for auto series from the current rows.
+ * After pruning a contaminated part the old offset can point at the wrong
+ * numbering, so this runs once at startup as part of the cleanup.
+ */
+export function recalcAutoOffset(db, series) {
+  if (Number(series.ep_offset_auto ?? 1) !== 1) return false;
+  const local = repo
+    .listFiles(db, series.id)
+    .filter((file) => file.kind === 'episode' && file.ep_number != null)
+    .map((file) => file.ep_number);
+  const numbers = repo
+    .listEpisodes(db, series.id)
+    .filter((episode) => isMainEpisodeType(episode.type))
+    .map((episode) => episode.number)
+    .filter(Number.isFinite);
+  if (local.length === 0 || numbers.length === 0) return false;
+  const { offset } = detectEpisodeOffset(local, numbers);
+  if (offset === (Number(series.ep_offset ?? 0) || 0)) return false;
+  repo.updateSeries(db, series.id, { ep_offset: offset, ep_offset_auto: 1 });
+  return true;
+}
+
+export function sanitizeAllParts(db) {
+  let removed = 0;
+  for (const series of repo.listSeries(db)) {
+    removed += sanitizeSeriesParts(db, series);
+    recalcAutoOffset(db, repo.getSeries(db, series.id));
+  }
+  return removed;
+}
 
 export const tagEpisodes = (episodes, bangumiId) =>
   episodes.map((episode) => ({ ...episode, bangumi_id: bangumiId }));
@@ -37,7 +180,7 @@ function sortRange(episodes) {
  * Looks for further Bangumi entries that cover local episode numbers the
  * primary entry does not. Only entries that actually fill a gap are attached.
  */
-async function attachSiblingParts({ client, query, episodes, wanted, excluded, maxCandidates = 8, maxParts = 2 }) {
+async function attachSiblingParts({ client, series, query, episodes, wanted, excluded, maxCandidates = 8, maxParts = 2 }) {
   const attached = [];
   const known = coveredNumbers(episodes);
   const takenIds = new Set(excluded);
@@ -60,6 +203,7 @@ async function attachSiblingParts({ client, query, episodes, wanted, excluded, m
     let best = null;
     for (const subject of hits.slice(0, maxCandidates)) {
       if (takenIds.has(subject.id)) continue;
+      if (!sameFranchise(series, { name_cn: subject.name_cn, name: subject.name })) continue;
       let list = [];
       try {
         list = await client.getEpisodes(subject.id);
@@ -70,6 +214,7 @@ async function attachSiblingParts({ client, query, episodes, wanted, excluded, m
 
       const covered = list.filter((episode) => missing.has(episode.number)).length;
       if (covered === 0) continue;
+      if (list.filter((episode) => known.has(episode.number)).length > 1) continue;
 
       // Prefer entries that sit next to what we already have, so an unrelated
       // show that happens to share an episode number is not pulled in.
@@ -98,7 +243,10 @@ async function attachSiblingParts({ client, query, episodes, wanted, excluded, m
  */
 export async function syncEpisodes({ db, client, series, query, logger = console }) {
   const primaryId = series.bangumi_id;
-  const stored = repo.listSeriesSubjects(db, series.id);
+  sanitizeSeriesParts(db, series);
+  const stored = repo
+    .listSeriesSubjects(db, series.id)
+    .filter((part) => part.bangumi_id === primaryId || sameFranchise(series, part));
   const partIds = [primaryId];
   for (const part of stored) {
     if (part.bangumi_id !== primaryId) partIds.push(part.bangumi_id);
@@ -130,6 +278,7 @@ export async function syncEpisodes({ db, client, series, query, logger = console
   if (wanted.length > 0) {
     const extra = await attachSiblingParts({
       client,
+      series,
       query,
       episodes,
       wanted,

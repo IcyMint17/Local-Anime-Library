@@ -12,6 +12,7 @@ import { dataPaths, ensureDirs, loadConfig, resolveProxy, saveConfig } from './c
 import { openDatabase, getCache, setCache, lastScanRun, listSeries } from './db/repo.js';
 import { BangumiClient } from './meta/bangumi.js';
 import { runScan } from './scan/pipeline.js';
+import { sanitizeAllParts } from './library/parts.js';
 import { createRoutes } from './api/routes.js';
 import { createServer } from './server.js';
 
@@ -123,6 +124,14 @@ export async function startLibraryApp(options = {}) {
   config.dataDir = paths.dataDir;
 
   const db = openDatabase(paths.dbPath);
+
+  // Older scans could attach a neighbouring show as a "sibling part" when it
+  // merely filled a numeric gap. Remove those rows once, at startup, so the
+  // detail page stops listing another series' episodes as missing.
+  const prunedParts = sanitizeAllParts(db);
+  if (prunedParts > 0) {
+    logger.log?.(`清理了 ${prunedParts} 个误挂的 Bangumi 分卷`);
+  }
 
   const { proxy, source } = await resolveProxy(config, { force: !config.resolvedProxy });
   config.resolvedProxy = proxy;
