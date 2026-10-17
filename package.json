@@ -1,6 +1,6 @@
 {
   "name": "anime-library",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "本地番剧媒体库管理器 — 扫描硬盘、自动识别番剧、生成可视化番剧库",
   "type": "module",

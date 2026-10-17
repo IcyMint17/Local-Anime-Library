@@ -182,9 +182,10 @@ test/                 node:test 测试，全部使用真实文件名
 ```
 cd desktop
 npm install          # 首次需要，从镜像下载 Electron 二进制
-npm run make-icon    # 由 public/icon.jpg 生成 icon.ico
+npm run make-icon    # 由 icon-source-rounded.png 生成多尺寸圆角 icon.ico
 npm start            # 开发模式运行
 npm run pack         # 打包到 desktop/dist/AnimeLibrary-win32-x64
+npm run installer    # 生成 desktop/installer/本地番剧媒体库-安装包-<version>.exe
 ```
 
 打包脚本会先把 `src/`、`public/`、`config.json` 和外壳文件整理进 `staging/`，

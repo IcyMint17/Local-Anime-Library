@@ -1406,7 +1406,7 @@ function renderSettings() {
                 <span class="settings-tab-icon">${icon(tab.icon)}</span><span>${tab.label}</span>
               </button>`
             ).join('')}
-            <div class="settings-version">本地番剧媒体库 · v0.1.0</div>
+            <div class="settings-version">本地番剧媒体库 · v0.2.0</div>
           </aside>
 
           <div class="settings-body" id="settingsBody"></div>
@@ -1687,7 +1687,7 @@ function advancedPanel() {
       </section>
       <section class="setting-group">
         <div class="setting-label">关于</div>
-        <p class="setting-hint">本地番剧媒体库 v0.1.0 · 只读扫描 · 数据保存在本机。</p>
+        <p class="setting-hint">本地番剧媒体库 v0.2.0 · 只读扫描 · 数据保存在本机。</p>
       </section>
     </div>`;
 }
