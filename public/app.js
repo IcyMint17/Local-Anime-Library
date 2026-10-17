@@ -2236,8 +2236,8 @@ function closeFileInfo() {
 async function revealSeriesFolder() {
   if (!state.detail) return;
   try {
-    await api(`/api/series/${state.detail.series.id}/reveal`, { method: 'POST' });
-    toast('已在文件管理器中打开番剧文件夹');
+    const result = await api(`/api/series/${state.detail.series.id}/reveal`, { method: 'POST' });
+    toast(`已打开文件夹：${result.folder ?? ''}。如果窗口没有出现在最前面，请检查任务栏。`);
   } catch (error) {
     toast(`无法打开文件夹：${error.message}`, true);
   }
