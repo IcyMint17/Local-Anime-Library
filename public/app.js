@@ -26,7 +26,7 @@ const state = {
   filter: 'all',
   type: 'all',
   year: 'all',
-  sort: 'recent',
+  sort: 'title',
   view: 'grid',
   query: '',
   // home + favourites
@@ -67,6 +67,7 @@ const ICONS = {
   check: '<path d="M4.6 12.4 9.4 17.2 19.6 6.8"/>',
   chevronRight: '<path d="m9.2 5.4 6.6 6.6-6.6 6.6"/>',
   chevronLeft: '<path d="m14.8 5.4-6.6 6.6 6.6 6.6"/>',
+  chevronDown: '<path d="m5.4 9.2 6.6 6.6 6.6-6.6"/>',
   arrowRight: '<path d="M4.2 12h15.2"/><path d="m13.6 6.2 5.8 5.8-5.8 5.8"/>',
   calendar:
     '<rect x="3.4" y="4.8" width="17.2" height="15.6" rx="3"/><path d="M7.6 3.2v3.2M16.4 3.2v3.2M3.4 9.6h17.2"/>',
@@ -1052,7 +1053,6 @@ function renderTimelineEvent(event) {
         <span>${esc(event.label)}${event.episodeTitle ? ` · ${esc(event.episodeTitle)}` : ''}</span>
         <span class="tl-date">${fmtDate(event.watchedAt)} · ${WEEKDAY_CN[new Date(event.watchedAt).getDay()]}</span>
       </span>
-      <span class="tl-state">${event.downloaded ? `${icon('download')} 已下载` : `${icon('check')} 已看`}</span>
     </button>`;
 }
 
@@ -1151,7 +1151,7 @@ function visibleLibraryItems() {
     progress: (a, b) => (b.progress?.percent ?? 0) - (a.progress?.percent ?? 0),
     files: (a, b) => (b.progress?.totalFiles ?? 0) - (a.progress?.totalFiles ?? 0),
   };
-  return items.sort(sorters[state.sort] ?? sorters.recent);
+  return items.sort(sorters[state.sort] ?? sorters.title);
 }
 
 const FILTER_LABEL = {
@@ -1173,6 +1173,29 @@ function filterButton(id, label, count, iconName) {
     </button>`;
 }
 
+function selectMenuMarkup(id, { label = '', value, options, className = '', align = 'left', ariaLabel = '' }) {
+  const selected = options.find((option) => option.value === value) ?? options[0];
+  return `
+    <div class="select-menu ${className}" data-select-menu="${id}"${align === 'right' ? ' data-align="right"' : ''}>
+      ${label ? `<span class="select-label">${esc(label)}</span>` : ''}
+      <button class="select-trigger" type="button" data-select-trigger="${id}" aria-haspopup="listbox"
+        aria-expanded="false"${ariaLabel ? ` aria-label="${esc(ariaLabel)}"` : ''}>
+        <span>${esc(selected.label)}</span>${icon('chevronDown')}
+      </button>
+      <div class="select-pop" role="listbox"${ariaLabel ? ` aria-label="${esc(ariaLabel)}"` : ''} hidden>
+        ${options
+          .map((option) => {
+            const active = option.value === value;
+            return `<button class="select-option${active ? ' is-active' : ''}" type="button" role="option"
+              aria-selected="${active}" data-select-option="${id}" data-value="${esc(option.value)}">
+              <span>${esc(option.label)}</span>${active ? icon('check') : ''}
+            </button>`;
+          })
+          .join('')}
+      </div>
+    </div>`;
+}
+
 function renderLibrary() {
   const page = $('page-library');
   if (!state.loaded) {
@@ -1185,12 +1208,17 @@ function renderLibrary() {
   const years = yearCounts();
   if (state.year !== 'all' && !years.some(([year]) => year === state.year)) state.year = 'all';
   const items = visibleLibraryItems();
-  const yearOptions = years
-    .map(
-      ([year, count]) =>
-        `<option value="${year}"${state.year === year ? ' selected' : ''}>${year} 年 · ${count} 部</option>`
-    )
-    .join('');
+  const yearOptions = [
+    { value: 'all', label: '全部年份' },
+    ...years.map(([year, count]) => ({ value: year, label: `${year} 年 · ${count} 部` })),
+  ];
+  const sortOptions = [
+    { value: 'title', label: '名称' },
+    { value: 'recent', label: '添加时间' },
+    { value: 'rating', label: '评分' },
+    { value: 'progress', label: '观看进度' },
+    { value: 'files', label: '文件数' },
+  ];
 
   page.innerHTML = `
     <div class="library-page">
@@ -1225,12 +1253,12 @@ function renderLibrary() {
 
           <div class="filter-group">
             <div class="filter-title">年份</div>
-            <label class="filter-select">
-              <select id="yearSelect" aria-label="按年份筛选">
-                <option value="all">全部年份</option>
-                ${yearOptions}
-              </select>
-            </label>
+            ${selectMenuMarkup('year', {
+              value: state.year,
+              options: yearOptions,
+              className: 'filter-select',
+              ariaLabel: '按年份筛选',
+            })}
           </div>
         </div>
       </aside>
@@ -1247,16 +1275,14 @@ function renderLibrary() {
               <button class="${state.view === 'grid' ? 'is-active' : ''}" type="button" data-view="grid" title="海报墙" aria-label="海报墙">${icon('library')}</button>
               <button class="${state.view === 'list' ? 'is-active' : ''}" type="button" data-view="list" title="列表" aria-label="列表">${icon('list')}</button>
             </div>
-            <label class="select-pill">
-              <span>排序</span>
-              <select id="sortSelect">
-                <option value="recent"${state.sort === 'recent' ? ' selected' : ''}>添加时间</option>
-                <option value="rating"${state.sort === 'rating' ? ' selected' : ''}>评分</option>
-                <option value="title"${state.sort === 'title' ? ' selected' : ''}>名称</option>
-                <option value="progress"${state.sort === 'progress' ? ' selected' : ''}>观看进度</option>
-                <option value="files"${state.sort === 'files' ? ' selected' : ''}>文件数</option>
-              </select>
-            </label>
+            ${selectMenuMarkup('sort', {
+              label: '排序',
+              value: state.sort,
+              options: sortOptions,
+              className: 'select-pill',
+              align: 'right',
+              ariaLabel: '排序方式',
+            })}
             <button class="btn btn-primary" type="button" data-scan data-scan-label="扫描媒体库">
               ${icon('refresh')}<span data-scan-label>扫描媒体库</span>
             </button>
@@ -1288,14 +1314,6 @@ function renderLibrary() {
       </section>
     </div>`;
 
-  $('sortSelect')?.addEventListener('change', (event) => {
-    state.sort = event.target.value;
-    renderLibrary();
-  });
-  $('yearSelect')?.addEventListener('change', (event) => {
-    state.year = event.target.value;
-    renderLibrary();
-  });
   renderScanStatus();
 }
 
@@ -2804,8 +2822,50 @@ async function toggleFavorite(seriesId, favorite) {
   }
 }
 
+function closeSelectMenus() {
+  document.querySelectorAll('.select-menu.is-open').forEach((menu) => {
+    menu.classList.remove('is-open');
+    menu.querySelector('.select-trigger')?.setAttribute('aria-expanded', 'false');
+    const pop = menu.querySelector('.select-pop');
+    if (pop) pop.hidden = true;
+  });
+}
+
+function toggleSelectMenu(trigger) {
+  const menu = trigger.closest('.select-menu');
+  const pop = menu?.querySelector('.select-pop');
+  if (!menu || !pop) return;
+  const wasOpen = menu.classList.contains('is-open');
+  closeSelectMenus();
+  if (wasOpen) return;
+  menu.classList.add('is-open');
+  trigger.setAttribute('aria-expanded', 'true');
+  pop.hidden = false;
+}
+
+document.addEventListener('dragstart', (event) => {
+  if (!document.documentElement.classList.contains('is-desktop-shell')) return;
+  if (event.target.closest('img, a')) event.preventDefault();
+});
+
 document.addEventListener('click', async (event) => {
   const target = event.target;
+  if (!target.closest('.select-menu')) closeSelectMenus();
+  const selectTrigger = target.closest('[data-select-trigger]');
+  if (selectTrigger) {
+    toggleSelectMenu(selectTrigger);
+    return undefined;
+  }
+  const selectOption = target.closest('[data-select-option]');
+  if (selectOption) {
+    const name = selectOption.dataset.selectOption;
+    const value = selectOption.dataset.value;
+    if (name === 'year') state.year = value;
+    else if (name === 'sort') state.sort = value;
+    closeSelectMenus();
+    renderLibrary();
+    return undefined;
+  }
   if (!target.closest('.head-more')) closeDetailMenu();
   else if (target.closest('.action-menu-item') && !target.closest('[data-action]')) closeDetailMenu();
   if (target === overlay) {
@@ -3141,6 +3201,10 @@ document.addEventListener('click', async (event) => {
 });
 
 document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && document.querySelector('.select-menu.is-open')) {
+    closeSelectMenus();
+    return;
+  }
   if (event.key === 'Escape' && !fileOverlay.hidden) closeFileInfo();
   else if (event.key === 'Escape' && !$('detailMenu')?.hidden) closeDetailMenu();
   else if (event.key === 'Escape' && !overlay.hidden) {
