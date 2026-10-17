@@ -1800,6 +1800,7 @@ async function loadSettings() {
 /* ----------------------------------------------------------------- detail */
 
 async function openDetail(seriesId) {
+  state.matchSeriesId = null;
   openOverlay('<div class="loading-panel"><span class="spinner"></span> 正在载入…</div>');
   state.detailTab = null;
   state.detailGroups = null;
@@ -1861,7 +1862,9 @@ function renderDetail() {
     ? `${mapping.matched}/${mapping.localTotal} 集对得上 · ${mapping.auto ? '自动推断' : '手动指定'}`
     : '尚未匹配 Bangumi';
   const bangumiLink = series.bangumi_id
-    ? `<a class="btn btn-ghost btn-sm" href="https://bgm.tv/subject/${series.bangumi_id}" target="_blank" rel="noreferrer">Bangumi</a>`
+    ? `<a class="action-menu-item" href="https://bgm.tv/subject/${series.bangumi_id}" target="_blank" rel="noreferrer">
+        ${icon('globe')}在 Bangumi 打开
+      </a>`
     : '';
 
   overlayPanel.innerHTML = `
@@ -1873,14 +1876,20 @@ function renderDetail() {
           <span>${esc(sourceFolder ?? '')}</span>
         </div>
         <div class="detail-head-actions">
-          <button class="btn btn-ghost btn-sm${series.favorite ? ' is-fav' : ''}" type="button" data-action="favorite">
+          <button class="btn btn-ghost btn-sm detail-fav${series.favorite ? ' is-fav' : ''}" type="button" data-action="favorite">
             ${icon(series.favorite ? 'heartSolid' : 'heart')}<span>${series.favorite ? '已收藏' : '收藏'}</span>
           </button>
-          <button class="btn btn-ghost btn-sm" type="button" data-action="watch-all">全部已看</button>
-          <button class="btn btn-ghost btn-sm" type="button" data-action="unwatch-all">全部未看</button>
-          <button class="btn btn-ghost btn-sm" type="button" data-action="reveal-series">${icon('folder')}打开文件夹</button>
-          <button class="btn btn-ghost btn-sm" type="button" data-action="rematch">重新匹配</button>
-          ${bangumiLink}
+          <button class="btn btn-primary btn-sm" type="button" data-action="watch-all">${icon('check')}全部已看</button>
+          <div class="head-more">
+            <button class="icon-btn" type="button" data-action="detail-more" aria-haspopup="menu" aria-expanded="false" title="更多操作" aria-label="更多操作">${icon('menu')}</button>
+            <div class="action-menu" id="detailMenu" role="menu" hidden>
+              <button class="action-menu-item" type="button" data-action="unwatch-all" role="menuitem">${icon('circle')}全部标为未看</button>
+              <button class="action-menu-item" type="button" data-action="reveal-series" role="menuitem">${icon('folder')}打开文件夹</button>
+              <button class="action-menu-item" type="button" data-action="rematch" role="menuitem">${icon('refresh')}重新匹配…</button>
+              <div class="action-menu-sep"></div>
+              ${bangumiLink}
+            </div>
+          </div>
         </div>
       </header>
 
@@ -2175,54 +2184,6 @@ async function openMatchDialog() {
     return hints;
   })();
 
-  openOverlay(
-    `<div class="dialog">
-      <header class="dialog-head"><h3>重新匹配番剧</h3><button class="btn btn-ghost btn-sm" type="button" data-action="close">关闭</button></header>
-      <div class="dialog-body">
-        <div class="field">
-          <label>当前文件夹</label>
-          <div class="field-hint"><code>${esc(series.source_folder ?? '')}</code></div>
-        </div>
-        <div class="field">
-          <label for="matchQuery">搜索 Bangumi</label>
-          <input id="matchQuery" class="text-input" type="text" value="${esc(series.source_folder ?? '')}" />
-          <div class="field-hint">支持中文名、日文原名、罗马音。列表里标着「当前」的就是现在绑定的条目。</div>
-        </div>
-        ${
-          searchHints.length
-            ? `<div class="field">
-                <label>文件名里的标题</label>
-                <div class="hint-row" id="matchHints">${searchHints
-                  .map((hint) => `<button class="btn btn-ghost btn-sm" type="button" data-hint="${esc(hint)}">${esc(hint)}</button>`)
-                  .join('')}</div>
-              </div>`
-            : ''
-        }
-        <div class="candidate-list" id="candidateList"><span class="spinner"></span></div>
-        <div class="field mapping-block">
-          <label class="check-row"><input type="checkbox" id="mapAuto" ${
-            state.detail.mapping?.auto !== false ? 'checked' : ''
-          } /> 自动推断集号对应</label>
-          <div class="mapping-inputs">
-            <span>本地第</span>
-            <input id="mapLocal" class="text-input" type="number" step="1" value="${state.detail.mapping?.localMin ?? 1}" />
-            <span>集 = Bangumi 第</span>
-            <input id="mapBgm" class="text-input" type="number" step="1" value="${
-              (state.detail.mapping?.localMin ?? 1) + (state.detail.mapping?.offset ?? 0)
-            }" />
-            <span>集</span>
-          </div>
-          <div class="field-hint" id="mapPreview"></div>
-        </div>
-      </div>
-      <footer class="dialog-foot">
-        <button class="btn btn-ghost" type="button" data-action="close">取消</button>
-        <button class="btn btn-primary" type="button" id="btnBind" disabled>应用</button>
-      </footer>
-    </div>`,
-    { narrow: true }
-  );
-
   const currentId = series.bangumi_id ?? null;
   const currentCandidate = currentId
     ? {
@@ -2236,24 +2197,174 @@ async function openMatchDialog() {
       }
     : null;
 
-  const runSearch = async (keyword) => {
+  state.matchResults = currentCandidate ? [currentCandidate] : [];
+  state.pendingCandidate = currentId;
+  state.matchSeriesId = series.id;
+
+  openOverlay(
+    `<div class="dialog match-dialog">
+      <header class="match-head">
+        <div class="match-head-main">
+          <span class="eyebrow">编辑匹配</span>
+          <h3>${esc(series.title_cn ?? '未命名')}</h3>
+          <p>${esc(series.source_folder ?? '')}</p>
+        </div>
+        <button class="round-btn" type="button" data-action="match-close" title="返回详情" aria-label="返回详情">${icon('chevronLeft')}</button>
+      </header>
+
+      <div class="match-body">
+        <section class="match-left">
+          <div class="match-search">
+            <span class="match-search-icon">${icon('search')}</span>
+            <input id="matchQuery" type="text" value="${esc(series.source_folder ?? '')}"
+              placeholder="搜索中文名、日文原名或罗马音…" autocomplete="off" spellcheck="false" />
+            <button class="btn btn-primary btn-sm" type="button" id="matchGo">搜索</button>
+          </div>
+          <p class="match-hint">列表里标着「当前」的是现在绑定的条目。</p>
+          ${
+            searchHints.length
+              ? `<div class="match-hint-chips" id="matchHints">
+                  <span>文件名里的标题</span>
+                  ${searchHints
+                    .map((hint) => `<button class="chip-btn" type="button" data-hint="${esc(hint)}">${esc(hint)}</button>`)
+                    .join('')}
+                </div>`
+              : ''
+          }
+          <div class="match-result-head"><span>搜索结果</span><span id="matchCount"></span></div>
+          <div class="candidate-list" id="candidateList"><div class="loading-panel"><span class="spinner"></span> 搜索中…</div></div>
+        </section>
+
+        <aside class="match-right">
+          <div class="match-section">
+            <div class="match-section-title">当前选择</div>
+            <div id="matchSelected"></div>
+          </div>
+
+          <div class="match-section">
+            <div class="match-section-title">集号对应</div>
+            <label class="check-row"><input type="checkbox" id="mapAuto" ${
+              state.detail.mapping?.auto !== false ? 'checked' : ''
+            } /> 自动推断集号</label>
+            <div class="mapping-grid">
+              <label>本地第 <input id="mapLocal" class="text-input" type="number" step="1" value="${
+                state.detail.mapping?.localMin ?? 1
+              }" /></label>
+              <span class="mapping-equals">=</span>
+              <label>Bangumi 第 <input id="mapBgm" class="text-input" type="number" step="1" value="${
+                (state.detail.mapping?.localMin ?? 1) + (state.detail.mapping?.offset ?? 0)
+              }" /></label>
+            </div>
+            <p class="field-hint" id="mapPreview"></p>
+          </div>
+          <p class="match-note">应用后会按 Bangumi 的剧集列表重新同步；已有的观看记录不会丢失。</p>
+        </aside>
+      </div>
+
+      <footer class="match-foot">
+        <span class="match-foot-hint" id="matchFooterHint"></span>
+        <div class="match-foot-actions">
+          <button class="btn btn-ghost" type="button" data-action="match-close">取消</button>
+          <button class="btn btn-primary" type="button" id="btnBind" disabled>应用更改</button>
+        </div>
+      </footer>
+    </div>`,
+    { match: true }
+  );
+
+  const input = $('matchQuery');
+  const applyButton = $('btnBind');
+
+  const renderSelection = () => {
+    const selected = state.matchResults?.find((item) => item.bangumiId === state.pendingCandidate) ?? null;
+    const target = $('matchSelected');
+    if (!target) return;
+    if (!selected) {
+      target.innerHTML = `<div class="match-selected-empty">${icon('search')}<span>先搜索并选择一个条目</span></div>`;
+      $('matchFooterHint').textContent = '';
+      applyButton.disabled = true;
+      return;
+    }
+    const isCurrent = selected.bangumiId === currentId;
+    const cover = selected.cover
+      ? `<img src="${esc(selected.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer" />`
+      : `<span class="cover-fallback" style="${posterFallback(selected.title ?? '')}">${esc(
+          firstChar(selected.title)
+        )}</span>`;
+    target.innerHTML = `
+      <div class="match-selected-card">
+        <div class="match-selected-cover">${cover}</div>
+        <div class="match-selected-main">
+          <span class="badge ${isCurrent ? 'badge-ok' : 'badge-live'}">${isCurrent ? '当前绑定' : '将绑定'}</span>
+          <strong>${esc(selected.title ?? '')}</strong>
+          <span>${esc(selected.original ?? '')}</span>
+          <span>${selected.date ?? '播出日期未知'}${selected.eps ? ` · ${selected.eps} 集` : ''}</span>
+        </div>
+      </div>`;
+    $('matchFooterHint').textContent = isCurrent
+      ? `当前绑定：${selected.title ?? ''}`
+      : `将绑定：${selected.title ?? ''}`;
+    applyButton.disabled = false;
+  };
+
+  const renderCandidateList = () => {
     const list = $('candidateList');
-    list.innerHTML = '<div class="loading-panel"><span class="spinner"></span> 搜索中…</div>';
+    const candidates = state.matchResults ?? [];
+    $('matchCount').textContent = `${candidates.length} 个候选`;
+    if (!candidates.length) {
+      list.innerHTML = `<div class="candidate-empty">${icon('search')}<span>没有搜索结果。换个关键词再试。</span></div>`;
+      return;
+    }
+    list.innerHTML = candidates
+      .map((candidate) => {
+        const selected = candidate.bangumiId === state.pendingCandidate;
+        const cover = candidate.cover
+          ? `<img src="${esc(candidate.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer" />`
+          : `<span class="cover-fallback" style="${posterFallback(candidate.title ?? '')}">${esc(
+              firstChar(candidate.title)
+            )}</span>`;
+        return `
+          <button class="candidate-card${selected ? ' is-selected' : ''}" type="button" data-id="${candidate.bangumiId}">
+            <span class="candidate-cover">${cover}</span>
+            <span class="candidate-main">
+              <span class="candidate-title">${esc(candidate.title ?? '')}${
+                candidate.current ? '<span class="current-badge">当前</span>' : ''
+              }</span>
+              <span class="candidate-orig">${esc(candidate.original ?? '')}</span>
+              <span class="candidate-meta">${candidate.date ?? '播出日期未知'}${
+                candidate.eps ? ` · ${candidate.eps} 集` : ''
+              }</span>
+            </span>
+            <span class="candidate-tail">
+              ${candidate.score != null ? `<span class="score-pill">${Math.round(candidate.score * 100)}%</span>` : ''}
+              ${selected ? `<span class="candidate-check">${icon('check')}</span>` : ''}
+            </span>
+          </button>`;
+      })
+      .join('');
+  };
+
+  const runSearch = async (keyword) => {
+    $('candidateList').innerHTML = '<div class="loading-panel"><span class="spinner"></span> 搜索中…</div>';
+    $('matchCount').textContent = '';
     try {
       const data = keyword
         ? await api(`/api/search?q=${encodeURIComponent(keyword)}`)
         : await api(`/api/series/${series.id}/candidates`);
       const results = data.candidates ?? [];
-      const merged = currentCandidate ? [currentCandidate, ...results.filter((item) => item.bangumiId !== currentId)] : results;
+      state.matchResults = currentCandidate
+        ? [currentCandidate, ...results.filter((item) => item.bangumiId !== currentId)]
+        : results;
       state.pendingCandidate = currentId;
-      $('btnBind').disabled = !currentId;
-      renderCandidates(list, merged);
+      renderCandidateList();
+      renderSelection();
     } catch (error) {
-      list.innerHTML = `<div class="muted">搜索失败：${esc(error.message)}</div>`;
+      $('candidateList').innerHTML = `<div class="candidate-empty">${icon('alert')}<span>搜索失败：${esc(
+        error.message
+      )}</span></div>`;
     }
   };
 
-  const input = $('matchQuery');
   let debounce = null;
   input.addEventListener('input', () => {
     clearTimeout(debounce);
@@ -2265,6 +2376,10 @@ async function openMatchDialog() {
       runSearch(input.value.trim());
     }
   });
+  $('matchGo').addEventListener('click', () => {
+    clearTimeout(debounce);
+    runSearch(input.value.trim());
+  });
   $('matchHints')?.addEventListener('click', (event) => {
     const chip = event.target.closest('[data-hint]');
     if (!chip) return;
@@ -2273,12 +2388,14 @@ async function openMatchDialog() {
     runSearch(chip.dataset.hint);
   });
   $('candidateList').addEventListener('click', (event) => {
-    const card = event.target.closest('.candidate');
+    const card = event.target.closest('.candidate-card');
     if (!card) return;
-    for (const node of $('candidateList').querySelectorAll('.candidate')) node.classList.remove('is-selected');
-    card.classList.add('is-selected');
     state.pendingCandidate = Number(card.dataset.id);
-    $('btnBind').disabled = false;
+    const list = $('candidateList');
+    const scrollTop = list.scrollTop;
+    renderCandidateList();
+    list.scrollTop = scrollTop;
+    renderSelection();
   });
 
   const auto = $('mapAuto');
@@ -2291,9 +2408,9 @@ async function openMatchDialog() {
     const local = Number(localInput.value);
     const bgm = Number(bgmInput.value);
     $('mapPreview').textContent = disabled
-      ? '重新按 Bangumi 的剧集列表推断（本地从第 67 集开始、Bangumi 从第 1 集开始这类情况会自动认出来）。'
+      ? '按 Bangumi 的剧集列表重新推断（本地从第 67 集开始、Bangumi 从第 1 集开始这类情况会自动认出来）。'
       : Number.isFinite(local) && Number.isFinite(bgm)
-        ? `即：本地集号 ${bgm - local >= 0 ? '+ ' : '− '}${Math.abs(bgm - local)} 后对应 Bangumi 集号。`
+        ? `本地集号 ${bgm - local >= 0 ? '+ ' : '− '}${Math.abs(bgm - local)} 后对应 Bangumi 集号。`
         : '请填写两个集号。';
   };
   auto.addEventListener('change', refreshMapping);
@@ -2301,66 +2418,37 @@ async function openMatchDialog() {
   bgmInput.addEventListener('input', refreshMapping);
   refreshMapping();
 
-  $('btnBind').addEventListener('click', async () => {
+  applyButton.addEventListener('click', async () => {
     if (!state.pendingCandidate) return;
-    const button = $('btnBind');
-    button.disabled = true;
-    button.textContent = '应用中…';
-    const seriesId = series.id;
+    applyButton.disabled = true;
+    applyButton.textContent = '应用中…';
     const mappingBody = auto.checked
       ? { auto: true }
       : { localNumber: Number(localInput.value), bangumiNumber: Number(bgmInput.value) };
     try {
       if (state.pendingCandidate === currentId) {
-        await api(`/api/series/${seriesId}/offset`, {
+        await api(`/api/series/${series.id}/offset`, {
           method: 'POST',
           body: auto.checked ? { mode: 'auto' } : { mode: 'manual', ...mappingBody },
         });
       } else {
-        await api(`/api/series/${seriesId}/match`, {
+        await api(`/api/series/${series.id}/match`, {
           method: 'POST',
           body: { bangumiId: state.pendingCandidate, ...mappingBody },
         });
       }
+      state.matchSeriesId = null;
       await loadData({ quiet: true });
-      await openDetail(seriesId);
+      await openDetail(series.id);
       toast(state.pendingCandidate === currentId ? '已更新集号对应' : '已重新绑定');
     } catch (error) {
       toast(`操作失败：${error.message}`, true);
-      button.disabled = false;
-      button.textContent = '应用';
+      applyButton.disabled = false;
+      applyButton.textContent = '应用更改';
     }
   });
 
   runSearch(series.source_folder ?? '');
-}
-
-function renderCandidates(container, candidates) {
-  if (!candidates.length) {
-    container.innerHTML = '<div class="muted">没有搜索结果。换个关键词再试。</div>';
-    return;
-  }
-  container.innerHTML = candidates
-    .map((candidate) => {
-      const cover = candidate.cover
-        ? `<img src="${esc(candidate.cover)}" alt="" loading="lazy" referrerpolicy="no-referrer" />`
-        : '';
-      return `
-        <div class="candidate${candidate.current ? ' is-selected is-current' : ''}" data-id="${candidate.bangumiId}">
-          <div class="candidate-cover">${cover}</div>
-          <div class="candidate-body">
-            <div class="candidate-title">${
-              candidate.current ? '<span class="current-badge">当前</span>' : ''
-            }${esc(candidate.title ?? '')}</div>
-            <div class="candidate-meta">${esc(candidate.original ?? '')}</div>
-            <div class="candidate-meta">${candidate.date ?? '播出日期未知'} · ${
-              candidate.eps ? `${candidate.eps} 集` : '集数未知'
-            }</div>
-          </div>
-          ${candidate.score != null ? `<span class="score-pill">${Math.round(candidate.score * 100)}%</span>` : ''}
-        </div>`;
-    })
-    .join('');
 }
 
 /* ------------------------------------------------------------------ scan */
@@ -2447,17 +2535,35 @@ function pollScan() {
 
 function openOverlay(html, options = {}) {
   overlayPanel.innerHTML = html;
+  overlayPanel.classList.remove('detail-panel');
   overlayPanel.classList.toggle('narrow', Boolean(options.narrow));
-  overlayPanel.classList.toggle('dialog-panel', Boolean(options.narrow));
+  overlayPanel.classList.toggle('dialog-panel', Boolean(options.narrow || options.match));
+  overlayPanel.classList.toggle('match-panel', Boolean(options.match));
   overlay.hidden = false;
   document.documentElement.classList.add('has-overlay');
 }
 
+function closeDetailMenu() {
+  const menu = $('detailMenu');
+  if (!menu) return;
+  menu.hidden = true;
+  document.querySelector('[data-action="detail-more"]')?.setAttribute('aria-expanded', 'false');
+}
+
+function closeMatchDialog() {
+  const seriesId = state.matchSeriesId;
+  state.matchSeriesId = null;
+  if (seriesId) openDetail(seriesId);
+  else closeOverlay();
+}
+
 function closeOverlay() {
   closeFileInfo();
+  closeDetailMenu();
+  state.matchSeriesId = null;
   overlay.hidden = true;
   overlayPanel.innerHTML = '';
-  overlayPanel.classList.remove('detail-panel', 'dialog-panel', 'narrow');
+  overlayPanel.classList.remove('detail-panel', 'dialog-panel', 'narrow', 'match-panel');
   document.documentElement.classList.remove('has-overlay');
   state.detail = null;
   state.detailGroups = null;
@@ -2484,7 +2590,11 @@ async function toggleFavorite(seriesId, favorite) {
 
 document.addEventListener('click', async (event) => {
   const target = event.target;
-  if (target === overlay) return closeOverlay();
+  if (!target.closest('.head-more')) closeDetailMenu();
+  else if (target.closest('.action-menu-item') && !target.closest('[data-action]')) closeDetailMenu();
+  if (target === overlay) {
+    return overlayPanel.classList.contains('match-panel') ? closeMatchDialog() : closeOverlay();
+  }
   if (target === fileOverlay) return closeFileInfo();
 
   const infoButton = target.closest('[data-file-info]');
@@ -2510,7 +2620,17 @@ document.addEventListener('click', async (event) => {
   const action = target.closest('[data-action]')?.dataset.action;
 
   if (action === 'close') return closeOverlay();
+  if (action === 'match-close') return closeMatchDialog();
   if (action === 'file-close') return closeFileInfo();
+  if (action === 'detail-more') {
+    const menu = $('detailMenu');
+    if (menu) {
+      menu.hidden = !menu.hidden;
+      target.closest('[data-action="detail-more"]')?.setAttribute('aria-expanded', String(!menu.hidden));
+    }
+    return undefined;
+  }
+  if (['unwatch-all', 'reveal-series', 'rematch', 'reveal-folder'].includes(action)) closeDetailMenu();
   if (action === 'reveal-series' || action === 'reveal-folder') return revealSeriesFolder();
 
   if (action === 'tab') {
@@ -2796,7 +2916,11 @@ document.addEventListener('click', async (event) => {
 
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && !fileOverlay.hidden) closeFileInfo();
-  else if (event.key === 'Escape' && !overlay.hidden) closeOverlay();
+  else if (event.key === 'Escape' && !$('detailMenu')?.hidden) closeDetailMenu();
+  else if (event.key === 'Escape' && !overlay.hidden) {
+    if (overlayPanel.classList.contains('match-panel')) closeMatchDialog();
+    else closeOverlay();
+  }
   const tag = document.activeElement?.tagName;
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(tag);
   if (event.key === '/' && overlay.hidden && !typing) {
