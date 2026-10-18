@@ -260,6 +260,16 @@ export function createRoutes({
     return { events, upcoming, additions };
   });
 
+  add('DELETE', '/api/series/:id', (params) => {
+    const seriesId = Number(params.id);
+    const series = repo.getSeries(db, seriesId);
+    if (!series) return { status: 404, body: { error: 'not found' } };
+    // Keep the folder out of future scans; the files themselves are untouched.
+    repo.ignoreFolder(db, series.local_key, series.source_folder);
+    repo.deleteSeries(db, seriesId);
+    return { ok: true };
+  });
+
   add('GET', '/api/series/:id', (params) => {
     const seriesId = Number(params.id);
     const series = repo.getSeries(db, seriesId);

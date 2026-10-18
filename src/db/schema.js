@@ -33,6 +33,14 @@ CREATE TABLE IF NOT EXISTS series (
 CREATE INDEX IF NOT EXISTS idx_series_bangumi ON series(bangumi_id);
 CREATE INDEX IF NOT EXISTS idx_series_folder ON series(source_folder);
 
+-- A deleted series must not come back on the next scan just because its
+-- folder is still under a scan root. Manual re-add clears this key.
+CREATE TABLE IF NOT EXISTS ignored_folders (
+  local_key    TEXT PRIMARY KEY,
+  source_folder TEXT,
+  created_at   TEXT
+);
+
 CREATE TABLE IF NOT EXISTS files (
   id         INTEGER PRIMARY KEY,
   path       TEXT UNIQUE,

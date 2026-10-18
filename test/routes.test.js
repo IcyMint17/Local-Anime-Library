@@ -5,7 +5,14 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { DEFAULT_CONFIG } from '../src/config.js';
-import { openDatabase, insertSeries, upsertFile, setWatchMark, replaceEpisodes } from '../src/db/repo.js';
+import {
+  openDatabase,
+  insertSeries,
+  upsertFile,
+  setWatchMark,
+  replaceEpisodes,
+  isFolderIgnored,
+} from '../src/db/repo.js';
 import { createRoutes } from '../src/api/routes.js';
 import { createServer } from '../src/server.js';
 
@@ -777,4 +784,49 @@ test('manual add: an existing folder outside scan roots is added and protected',
   });
   const library = await (await fetch(`${harness.base}/api/library`)).json();
   assert.ok(library.items.some((item) => item.id === body.series[0].id));
+});
+
+
+test('delete: removes the series, its files and ignores its folder', async () => {
+  const harness = await startHarness();
+  const seriesId = insertSeries(harness.db, {
+    local_key: `${harness.dir}|delete-me|x`,
+    source_folder: 'delete-me',
+    title_cn: '待删除番剧',
+    bangumi_id: 123,
+  });
+  upsertFile(harness.db, seriesId, {
+    path: path.join(harness.dir, 'delete-me', '01.mkv'),
+    name: '01.mkv',
+    ext: '.mkv',
+    kind: 'episode',
+    ep_number: 1,
+  });
+
+  const response = await fetch(`${harness.base}/api/series/${seriesId}`, { method: 'DELETE' });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).ok, true);
+  assert.equal(isFolderIgnored(harness.db, `${harness.dir}|delete-me|x`), true);
+
+  const missing = await fetch(`${harness.base}/api/series/${seriesId}`);
+  assert.equal(missing.status, 404);
+  assert.equal(harness.db.prepare('SELECT COUNT(*) AS n FROM files WHERE series_id = ?').get(seriesId).n, 0);
+  assert.equal(harness.db.prepare('SELECT COUNT(*) AS n FROM episodes WHERE series_id = ?').get(seriesId).n, 0);
+  assert.equal(harness.db.prepare('SELECT COUNT(*) AS n FROM series_subjects WHERE series_id = ?').get(seriesId).n, 0);
+
+  // The next scan must not silently re-add the deleted folder.
+  const { runScan } = await import('../src/scan/pipeline.js');
+  await runScan({
+    db: harness.db,
+    config: {
+      ...DEFAULT_CONFIG,
+      scan: { ...DEFAULT_CONFIG.scan, dirs: [harness.dir] },
+      coversDir: path.join(harness.dir, 'covers'),
+    },
+    client: {},
+    coversDir: path.join(harness.dir, 'covers'),
+    onProgress: () => {},
+  });
+  const library = await (await fetch(`${harness.base}/api/library`)).json();
+  assert.ok(!library.items.some((item) => item.title_cn === '待删除番剧'));
 });

@@ -42,6 +42,8 @@ const state = {
   pendingCandidate: null,
 };
 
+let deleteTarget = null;
+
 const addSeries = {
   tab: 'folder',
   folder: '',
@@ -2170,6 +2172,7 @@ function renderDetail() {
               <button class="action-menu-item" type="button" data-action="rematch" role="menuitem">${icon('refresh')}重新匹配…</button>
               <div class="action-menu-sep"></div>
               ${bangumiLink}
+              <button class="action-menu-item is-danger" type="button" data-action="delete-series" role="menuitem">${icon('trash')}从媒体库移除…</button>
             </div>
           </div>
         </div>
@@ -2841,6 +2844,67 @@ function openOverlay(html, options = {}) {
   document.documentElement.classList.add('has-overlay');
 }
 
+function deleteSeriesMarkup() {
+  const title = deleteTarget?.title ?? '这部番剧';
+  const hasLocalFolder = Boolean(deleteTarget?.local);
+  return `
+    <div class="delete-dialog">
+      <span class="eyebrow">${icon('trash')}危险操作</span>
+      <h2>从媒体库移除「${esc(title)}」？</h2>
+      <p>会删除这部番剧的媒体库记录、观看进度和集号映射。</p>
+      <p class="delete-warning">不会删除硬盘上的视频文件。</p>
+      <p class="add-hint">${
+        hasLocalFolder
+          ? '这个文件夹之后不会在扫描时自动重新添加；如需恢复，可以用「添加番剧 → 本地文件夹」重新选择。'
+          : '这是未下载番剧，移除后只会删除占位记录。'
+      }</p>
+      <p class="add-error" id="deleteError" hidden></p>
+      <div class="delete-actions">
+        <button class="btn btn-ghost" type="button" data-action="delete-cancel">取消</button>
+        <button class="btn btn-danger" type="button" data-action="delete-confirm">确认移除</button>
+      </div>
+    </div>`;
+}
+
+function confirmDeleteSeries() {
+  const detail = state.detail;
+  if (!detail?.series) return;
+  deleteTarget = {
+    id: detail.series.id,
+    title: detail.series.title_cn ?? detail.series.title_orig ?? '未命名',
+    local: Boolean(detail.series.source_folder),
+  };
+  closeDetailMenu();
+  openOverlay(deleteSeriesMarkup(), { narrow: true });
+}
+
+function cancelDeleteSeries() {
+  const id = deleteTarget?.id;
+  deleteTarget = null;
+  if (id) openDetail(id);
+  else closeOverlay();
+}
+
+async function removeSeries() {
+  const target = deleteTarget;
+  if (!target) return;
+  try {
+    await api(`/api/series/${target.id}`, { method: 'DELETE' });
+    deleteTarget = null;
+    closeOverlay();
+    await loadData({ quiet: true });
+    toast(`已从媒体库移除「${target.title}」`);
+  } catch (error) {
+    const node = $('deleteError');
+    if (node) {
+      node.hidden = false;
+      node.textContent = `移除失败：${error.message}`;
+    } else {
+      toast(`移除失败：${error.message}`, true);
+    }
+  }
+}
+
 function addSeriesMarkup() {
   const isDesktop = Boolean(window.desktopWindow?.pickFolder);
   const folder = addSeries.tab === 'folder'
@@ -3137,6 +3201,7 @@ document.addEventListener('click', async (event) => {
   if (!target.closest('.head-more')) closeDetailMenu();
   else if (target.closest('.action-menu-item') && !target.closest('[data-action]')) closeDetailMenu();
   if (target === overlay) {
+    if (deleteTarget) return cancelDeleteSeries();
     return overlayPanel.classList.contains('match-panel') ? closeMatchDialog() : closeOverlay();
   }
   if (target === fileOverlay) return closeFileInfo();
@@ -3174,7 +3239,10 @@ document.addEventListener('click', async (event) => {
     }
     return undefined;
   }
-  if (['unwatch-all', 'reveal-series', 'rematch', 'reveal-folder'].includes(action)) closeDetailMenu();
+  if (['unwatch-all', 'reveal-series', 'rematch', 'reveal-folder', 'delete-series'].includes(action)) closeDetailMenu();
+  if (action === 'delete-series') return confirmDeleteSeries();
+  if (action === 'delete-cancel') return cancelDeleteSeries();
+  if (action === 'delete-confirm') return removeSeries();
   if (action === 'reveal-series' || action === 'reveal-folder') return revealSeriesFolder();
 
   if (action === 'tab') {
@@ -3488,6 +3556,10 @@ document.addEventListener('keydown', (event) => {
   }
   if (event.key === 'Escape' && document.querySelector('.select-menu.is-open')) {
     closeSelectMenus();
+    return;
+  }
+  if (event.key === 'Escape' && deleteTarget) {
+    cancelDeleteSeries();
     return;
   }
   if (event.key === 'Escape' && !fileOverlay.hidden) closeFileInfo();

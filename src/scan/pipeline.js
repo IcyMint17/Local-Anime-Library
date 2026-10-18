@@ -135,7 +135,9 @@ export async function addLocalFolder({ db, config, client, coversDir, folder, lo
   const groups = groupFiles(result.files, { rootName: path.basename(folder), root: folder });
   const series = [];
   for (const group of groups) {
-    const existing = repo.findSeriesByLocalKey(db, localKeyFor(group));
+    const localKey = localKeyFor(group);
+    repo.unignoreFolder(db, localKey);
+    const existing = repo.findSeriesByLocalKey(db, localKey);
     let outcome = null;
     if (!existing || existing.match_state === 'unmatched') {
       outcome = await findMatches(client, group, {
@@ -195,6 +197,7 @@ export async function runScan({ db, config, client, coversDir, onProgress = () =
   for (const group of allGroups) {
     index += 1;
     const localKey = localKeyFor(group);
+    if (repo.isFolderIgnored(db, localKey)) continue;
     const existing = repo.findSeriesByLocalKey(db, localKey);
     onProgress({
       phase: 'match',

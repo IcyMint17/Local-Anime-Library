@@ -84,9 +84,31 @@ export function updateSeries(db, id, patch) {
 export function deleteSeries(db, id) {
   db.prepare('DELETE FROM watch_marks WHERE series_id = ?').run(id);
   db.prepare('DELETE FROM match_candidates WHERE series_id = ?').run(id);
+  db.prepare('DELETE FROM series_subjects WHERE series_id = ?').run(id);
   db.prepare('DELETE FROM episodes WHERE series_id = ?').run(id);
   db.prepare('DELETE FROM files WHERE series_id = ?').run(id);
   db.prepare('DELETE FROM series WHERE id = ?').run(id);
+}
+
+/* --------------------------------------------------------- ignored folders */
+
+export function ignoreFolder(db, localKey, sourceFolder = null) {
+  if (!localKey) return;
+  db.prepare('INSERT OR REPLACE INTO ignored_folders (local_key, source_folder, created_at) VALUES (?,?,?)').run(
+    localKey,
+    sourceFolder ?? null,
+    now()
+  );
+}
+
+export function unignoreFolder(db, localKey) {
+  if (!localKey) return;
+  db.prepare('DELETE FROM ignored_folders WHERE local_key = ?').run(localKey);
+}
+
+export function isFolderIgnored(db, localKey) {
+  if (!localKey) return false;
+  return Boolean(db.prepare('SELECT 1 FROM ignored_folders WHERE local_key = ?').get(localKey));
 }
 
 /* ------------------------------------------------------------------- files */

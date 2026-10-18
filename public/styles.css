@@ -6048,3 +6048,66 @@ kbd {
     flex-basis: 100%;
   }
 }
+
+/* ------------------------------------------------------- delete series */
+.action-menu-item.is-danger {
+  color: #ff9a9d;
+}
+
+.action-menu-item.is-danger .ic {
+  color: #ff9a9d;
+}
+
+.action-menu-item.is-danger:hover {
+  background: rgba(229, 72, 77, 0.14);
+  color: #ffc3c5;
+}
+
+.btn-danger {
+  border: 1px solid rgba(229, 72, 77, 0.46);
+  background: #e5484d;
+  color: #fff;
+}
+
+.btn-danger:hover {
+  background: #f05b60;
+  border-color: #f05b60;
+}
+
+.delete-dialog {
+  width: 100%;
+  padding: 26px;
+}
+
+.delete-dialog h2 {
+  margin: 9px 0 14px;
+  font-size: 23px;
+  line-height: 1.35;
+}
+
+.delete-dialog > p {
+  margin: 0 0 9px;
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.delete-dialog .delete-warning {
+  color: #ffb3b5;
+  font-weight: 600;
+}
+
+.delete-dialog .add-hint {
+  margin: 12px 0 0;
+}
+
+.delete-dialog .add-error {
+  margin-top: 12px;
+}
+
+.delete-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 22px;
+}
