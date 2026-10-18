@@ -94,11 +94,24 @@ export function cacheBytes(userData) {
  *
  * @returns {{before:number, after:number, removed:string[], skipped:string[]}}
  */
-export function clearProfileCachesSync(userData, { keepGpu = false } = {}) {
+export function clearProfileCachesSync(userData, { keepGpu = false, live = false } = {}) {
   const gpuNames = new Set(GPU_CACHE_DIRS);
-  const targets = entryPaths(userData).filter(
-    (target) => !keepGpu || !gpuNames.has(path.basename(target))
-  );
+  const deferred = [];
+  const targets = entryPaths(userData).filter((target) => {
+    const name = path.basename(target);
+    // GPU/Code caches are memory-mapped by the running Chromium processes;
+    // deleting them under a live app can take the GPU process down. They are
+    // cleared on the next cold start instead.
+    if (keepGpu && gpuNames.has(name)) {
+      if (fs.existsSync(target)) deferred.push(name);
+      return false;
+    }
+    if (live && (gpuNames.has(name) || name === 'Code Cache')) {
+      if (fs.existsSync(target)) deferred.push(name);
+      return false;
+    }
+    return true;
+  });
   const before = targets.reduce((total, target) => total + sizeOf(target), 0);
 
   const removed = [];
@@ -118,7 +131,7 @@ export function clearProfileCachesSync(userData, { keepGpu = false } = {}) {
   }
 
   const after = targets.reduce((total, target) => total + sizeOf(target), 0);
-  return { before, after, removed, skipped };
+  return { before, after, removed, skipped, deferred };
 }
 
 /**
@@ -128,15 +141,13 @@ export function clearProfileCachesSync(userData, { keepGpu = false } = {}) {
  * processes, so the on-disk delete is best effort for whatever is left.
  */
 export async function clearProfileCaches(userData, { session = null } = {}) {
-  if (session) {
-    // `ignore(undefined)` has to be safe too: not every Electron version
-    // implements all three, and `undefined.catch()` would throw.
-    const ignore = (result) => Promise.resolve(result).catch(() => {});
-    await ignore(session.clearCache?.());
-    await ignore(session.clearCodeCaches?.({ urls: [] }));
-    await ignore(session.clearStorageData?.({ storages: ['shadercache', 'cachestorage'] }));
+  if (session?.clearCache) {
+    // Only the HTTP cache is safe to drop while the app is running. Clearing
+    // code/shader caches through the session has caused renderer/GPU crashes on
+    // some Windows drivers, so those are deferred to the next cold start.
+    await Promise.resolve(session.clearCache()).catch(() => {});
   }
-  return clearProfileCachesSync(userData);
+  return clearProfileCachesSync(userData, { live: true });
 }
 
 export function formatBytes(bytes) {

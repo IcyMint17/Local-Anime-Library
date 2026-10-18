@@ -70,13 +70,15 @@ test('cache: the running-app path drops the in-memory copies first', async () =>
   const session = {
     clearCache: async () => calls.push('http'),
     clearCodeCaches: async () => calls.push('code'),
-    clearStorageData: async ({ storages }) => calls.push(`storage:${storages.join(',')}`),
+    clearStorageData: async () => calls.push('storage'),
   };
 
   const result = await clearProfileCaches(dir, { session });
 
-  assert.deepEqual(calls, ['http', 'code', 'storage:shadercache,cachestorage']);
+  assert.deepEqual(calls, ['http'], 'only the safe HTTP cache is touched while running');
   assert.equal(result.after, 0);
+  assert.ok(result.deferred.includes('GPUCache'));
+  assert.ok(fs.existsSync(path.join(dir, 'GPUCache')), 'GPU cache survives a live cleanup');
   assert.ok(fs.existsSync(path.join(dir, 'library', 'library.db')));
 
   fs.rmSync(dir, { recursive: true, force: true });
@@ -86,6 +88,7 @@ test('cache: an Electron session without the optional APIs is still fine', async
   const dir = fakeProfile();
   const result = await clearProfileCaches(dir, { session: {} });
   assert.equal(result.after, 0);
+  assert.ok(fs.existsSync(path.join(dir, 'GPUCache')));
   assert.ok(fs.existsSync(path.join(dir, 'library', 'library.db')));
   fs.rmSync(dir, { recursive: true, force: true });
 });

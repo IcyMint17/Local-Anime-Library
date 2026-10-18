@@ -1292,7 +1292,6 @@ function renderLibrary() {
               <button class="${state.view === 'grid' ? 'is-active' : ''}" type="button" data-view="grid" title="海报墙" aria-label="海报墙">${icon('library')}</button>
               <button class="${state.view === 'list' ? 'is-active' : ''}" type="button" data-view="list" title="列表" aria-label="列表">${icon('list')}</button>
             </div>
-            <button class="btn btn-ghost" type="button" data-add-series>${icon('plus')}添加番剧</button>
             ${selectMenuMarkup('sort', {
               label: '排序',
               value: state.sort,
@@ -1301,9 +1300,13 @@ function renderLibrary() {
               align: 'right',
               ariaLabel: '排序方式',
             })}
-            <button class="btn btn-primary" type="button" data-scan data-scan-label="扫描媒体库">
-              ${icon('refresh')}<span data-scan-label>扫描媒体库</span>
-            </button>
+            <div class="library-action-split">
+              <button class="btn btn-primary" type="button" data-scan data-scan-label="扫描媒体库">
+                ${icon('refresh')}<span data-scan-label>扫描媒体库</span>
+              </button>
+              <button class="btn btn-primary library-add-btn" type="button" data-add-series
+                title="添加番剧" aria-label="添加番剧">${icon('plus')}</button>
+            </div>
           </div>
         </header>
 
@@ -1757,7 +1760,7 @@ function advancedPanel() {
                </div>`
             : '<p class="setting-hint">浏览器版不产生桌面缓存，无需清理。</p>'
         }
-        <p class="setting-hint">只清理 Chromium 的 Cache / GPUCache 等派生文件，不会动番剧库、封面、观看记录和设置。</p>
+        <p class="setting-hint">运行时会清理 HTTP 缓存；正在使用的 GPU / 代码缓存在下次启动时清理，避免显卡进程崩溃。番剧库、封面、观看记录和设置都不会动。</p>
       </section>
       <section class="setting-group">
         <div class="setting-label">快捷键</div>
@@ -2137,14 +2140,6 @@ function renderDetail() {
   if (!state.detailTab || !tabs.some((tab) => tab.id === state.detailTab)) state.detailTab = tabs[0].id;
 
   const tags = tagsFor(series, counts);
-  const mapping = state.detail.mapping ?? { offset: 0, auto: true, matched: 0, localTotal: 0 };
-  const mappingText =
-    mapping.offset === 0
-      ? '本地集号与 Bangumi 一致'
-      : `本地 ${mapping.localMin ?? '?'} 集 → Bangumi 第 ${(mapping.localMin ?? 0) + mapping.offset} 集`;
-  const mappingMeta = series.bangumi_id
-    ? `${mapping.matched}/${mapping.localTotal} 集对得上 · ${mapping.auto ? '自动推断' : '手动指定'}`
-    : '尚未匹配 Bangumi';
   const bangumiLink = series.bangumi_id
     ? `<a class="action-menu-item" href="https://bgm.tv/subject/${series.bangumi_id}" target="_blank" rel="noreferrer">
         ${icon('globe')}在 Bangumi 打开
@@ -2198,15 +2193,6 @@ function renderDetail() {
           <div id="detailInfo">${detailInfoMarkup(series, progress, null)}</div>
           <div class="tag-row" id="detailTags">${detailTagsMarkup(null, tags)}</div>
 
-          <div class="source-block">
-            <div class="source-label">集号对应</div>
-            ${
-              series.bangumi_id
-                ? `<div class="mapping-value">${esc(mappingText)}</div>
-                   <div class="source-meta">${esc(mappingMeta)}（在「重新匹配」里调整）</div>`
-                : '<div class="source-meta">匹配到 Bangumi 之后才能计算集号对应关系。</div>'
-            }
-          </div>
           <div class="source-block">
             <div class="source-label">来源</div>
             <code>${esc(sourceFolder ?? '')}</code>
@@ -3525,7 +3511,8 @@ document.addEventListener('click', async (event) => {
     try {
       const result = await window.desktopWindow.clearCache();
       if (result?.canceled) return undefined;
-      toast(result?.freed ? `已释放 ${result.freed}` : '缓存已清理');
+      const deferred = result?.deferred?.length ? '；GPU/代码缓存将在下次启动清理' : '';
+      toast(result?.freed ? `已释放 ${result.freed}${deferred}` : `缓存已清理${deferred}`);
       refreshCacheInfo();
     } catch (error) {
       toast(`清理缓存失败：${error.message}`, true);

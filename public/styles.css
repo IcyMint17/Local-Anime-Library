@@ -343,10 +343,14 @@ body::after {
   align-items: center;
   gap: 11px;
   min-width: 0;
+  pointer-events: none;
 }
 
 .brand-mark {
   width: 36px;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+  cursor: pointer;
   height: 36px;
   flex-shrink: 0;
   border-radius: 11px;
@@ -368,6 +372,7 @@ body::after {
 
 .brand-text {
   display: flex;
+  pointer-events: none;
   flex-direction: column;
   min-width: 0;
   line-height: 1.2;
@@ -2211,7 +2216,7 @@ body::after {
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
   gap: 20px;
-  align-items: start;
+  align-items: stretch;
   margin-bottom: 16px;
 }
 
@@ -2247,6 +2252,7 @@ body::after {
 .timeline-list--scroll .tl-event {
   width: 100%;
   min-width: 0;
+  margin: 0;
 }
 
 @media (max-width: 1080px) {
@@ -4843,6 +4849,13 @@ kbd {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .library-side {
+    position: static;
+    z-index: auto;
+    max-height: none;
+    overflow: visible;
+  }
+
   .filter-panel {
     position: static;
     flex-direction: row;
@@ -6110,4 +6123,37 @@ kbd {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 22px;
+}
+
+/* Scan is primary; the adjacent plus opens 添加番剧 without taking a second pill. */
+.library-action-split {
+  display: inline-flex;
+  align-items: stretch;
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+.library-action-split .btn {
+  height: 38px;
+  border-radius: 0;
+}
+
+.library-action-split .btn:first-child {
+  border-radius: 12px 0 0 12px;
+}
+
+.library-action-split .btn:last-child {
+  border-radius: 0 12px 12px 0;
+}
+
+.library-action-split .library-add-btn {
+  width: 38px;
+  padding: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.24);
+  box-shadow: none;
+}
+
+.library-action-split .library-add-btn .ic {
+  width: 15px;
+  height: 15px;
 }

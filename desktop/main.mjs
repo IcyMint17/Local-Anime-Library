@@ -231,6 +231,7 @@ ipcMain.handle('cache:clear', async () => {
     skipped: result.skipped,
     text: formatBytes(result.after),
     freed: formatBytes(Math.max(0, result.before - result.after)),
+    deferred: result.deferred ?? [],
   };
 });
 
