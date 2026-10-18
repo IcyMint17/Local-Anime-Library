@@ -11,6 +11,7 @@ import { computeProgress, computeProgressAll } from '../library/progress.js';
 import { applyAutoOffset, mappingState, matchLocalToBangumi } from '../library/mapping.js';
 import { isValidOffset, MAX_OFFSET } from '../library/offset.js';
 import { syncEpisodes, reclassifyFromBangumi } from '../library/parts.js';
+import { addLocalFolder } from '../scan/pipeline.js';
 import { EPISODE_KEY, SPECIAL_KEY, MOVIE_KEY, itemKeyFor } from '../library/items.js';
 import { isMainEpisodeType, BangumiClient } from '../meta/bangumi.js';
 
@@ -541,6 +542,111 @@ export function createRoutes({
         score: candidate.score,
         cover: candidate.images?.large ?? candidate.images?.common ?? candidate.images?.grid ?? null,
       })),
+    };
+  });
+
+  add('POST', '/api/library/add-folder', async (_params, body) => {
+    const folder = path.resolve(String(body.folder ?? '').trim());
+    if (!body.folder || !path.isAbsolute(String(body.folder).trim())) {
+      return { status: 400, body: { error: '请提供绝对路径' } };
+    }
+    let stat = null;
+    try {
+      stat = fs.statSync(folder);
+    } catch {
+      stat = null;
+    }
+    if (!stat?.isDirectory()) return { status: 400, body: { error: '文件夹不存在或不可读' } };
+
+    try {
+      const result = await addLocalFolder({
+        db,
+        config,
+        client,
+        coversDir: config.coversDir,
+        folder,
+        logger: console,
+      });
+      if (result.files === 0) {
+        return { status: 400, body: { error: '这个文件夹里没有找到视频文件' } };
+      }
+      const items = result.series.map(({ id }) => {
+        const series = repo.getSeries(db, id);
+        return seriesToJson(series, computeProgress(db, series));
+      });
+      return { ok: true, added: result.created, series: items };
+    } catch (error) {
+      return { status: 500, body: { error: `添加文件夹失败：${error.message}` } };
+    }
+  });
+
+  add('POST', '/api/library/add-subject', async (_params, body) => {
+    const bangumiId = Number(body.bangumiId);
+    if (!Number.isFinite(bangumiId)) return { status: 400, body: { error: 'bangumiId is required' } };
+
+    const existing = repo.findSeriesByBangumiId(db, bangumiId);
+    if (existing) {
+      const progress = computeProgress(db, existing);
+      if (progress.totalFiles > 0) {
+        return { status: 409, body: { error: '媒体库中已有这部番剧', series: seriesToJson(existing, progress) } };
+      }
+      return { ok: true, added: false, series: seriesToJson(existing, progress) };
+    }
+
+    let subject;
+    try {
+      subject = await client.getSubject(bangumiId, { useCache: false });
+    } catch (error) {
+      return { status: 502, body: { error: `无法读取 Bangumi 条目：${error.message}` } };
+    }
+    if (!subject?.id && !subject?.name) {
+      return { status: 404, body: { error: 'Bangumi 条目不存在' } };
+    }
+
+    const seriesId = repo.insertSeries(db, {
+      local_key: null,
+      source_folder: null,
+      bangumi_id: subject.id ?? bangumiId,
+      title_cn: subject.name_cn || subject.name || `Bangumi ${bangumiId}`,
+      title_orig: subject.name ?? null,
+      summary: subject.summary ?? null,
+      air_date: subject.date ?? null,
+      eps_total: Number.isFinite(subject.eps) && subject.eps > 0 ? subject.eps : null,
+      cover_url: subject.images?.large ?? subject.images?.common ?? subject.images?.grid ?? null,
+      rating: subject.rating?.score ?? null,
+      rating_count: subject.rating?.total ?? null,
+      media_kind: subject.eps === 1 ? 'movie' : 'episode',
+      match_state: 'manual',
+      manual: 1,
+    });
+    repo.replaceCandidates(db, seriesId, []);
+
+    try {
+      const current = repo.getSeries(db, seriesId);
+      await syncEpisodes({
+        db,
+        client,
+        series: current,
+        query: current.title_cn ?? current.title_orig ?? '',
+        logger: client.logger,
+      });
+      const cover = await ensureCover({
+        subject,
+        coversDir: config.coversDir,
+        proxy: client.proxy,
+        userAgent: client.userAgent,
+      });
+      if (cover) repo.updateSeries(db, seriesId, { cover_path: path.basename(cover) });
+    } catch (error) {
+      // The placeholder is still useful for its metadata if Bangumi's episode
+      // list or cover download fails.
+      console.warn(`添加未下载番剧时同步失败: ${error.message}`);
+    }
+
+    const saved = repo.getSeries(db, seriesId);
+    return {
+      status: 200,
+      body: { ok: true, added: true, series: seriesToJson(saved, computeProgress(db, saved)) },
     };
   });
 

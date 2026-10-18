@@ -171,6 +171,15 @@ ipcMain.on('window:menu', () => {
 });
 ipcMain.handle('window:get-state', () => ({ maximized: Boolean(mainWindow?.isMaximized()) }));
 
+/** Native folder picker for "手动添加本地番剧". */
+ipcMain.handle('folder:pick', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: '选择番剧文件夹',
+    properties: ['openDirectory'],
+  });
+  return result.canceled ? null : result.filePaths[0] ?? null;
+});
+
 /** Actual GPU state, shown in Settings → Advanced. */
 ipcMain.handle('gpu:info', async () => {
   const status = app.getGPUFeatureStatus?.() ?? {};

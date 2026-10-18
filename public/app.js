@@ -42,6 +42,16 @@ const state = {
   pendingCandidate: null,
 };
 
+const addSeries = {
+  tab: 'folder',
+  folder: '',
+  query: '',
+  results: [],
+  searching: false,
+  adding: null,
+  error: '',
+};
+
 const $ = (id) => document.getElementById(id);
 const pagesEl = $('pages');
 const overlay = $('overlay');
@@ -633,6 +643,7 @@ function renderPosterCard(item, { minimal = false } = {}) {
   // detail panel, and status badges are reserved for the dense library view.
   const sub = total ? `${progress.watched ?? 0} / ${total} 集` : `${progress.totalFiles ?? 0} 个文件`;
   const badges = minimal ? '' : statusBadge(item);
+  const downloaded = (progress.totalFiles ?? 0) > 0;
 
   return `
     <article class="poster-card${minimal ? ' is-minimal' : ''}" data-series="${item.id}" tabindex="0" role="button" aria-label="${esc(
@@ -642,6 +653,7 @@ function renderPosterCard(item, { minimal = false } = {}) {
         ${coverMarkup(item, 'poster-img')}
         <span class="poster-shade"></span>
         ${badges ? `<span class="poster-badges">${badges}</span>` : ''}
+        ${downloaded ? '' : '<span class="poster-undownloaded">未下载</span>'}
         <button class="fav-btn${favorite ? ' is-on' : ''}" type="button" data-favorite="${item.id}"
           title="${favorite ? '取消收藏' : '收藏'}" aria-label="${favorite ? '取消收藏' : '收藏'}" aria-pressed="${favorite}">
           ${icon(favorite ? 'heartSolid' : 'heart')}
@@ -669,6 +681,7 @@ function renderMediaRow(item) {
         </div>
         <p class="media-row-orig">${esc(item.title_orig ?? item.source_folder ?? '')}</p>
         <div class="media-row-meta">
+          ${(progress.totalFiles ?? 0) === 0 ? '<span class="badge badge-download">未下载</span>' : ''}
           ${statusBadge(item)}
           <span>${KIND_LABEL[item.media_kind] ?? '番剧'}</span>
           ${item.air_date ? `<span>${esc(String(item.air_date).slice(0, 4))}</span>` : ''}
@@ -1277,6 +1290,7 @@ function renderLibrary() {
               <button class="${state.view === 'grid' ? 'is-active' : ''}" type="button" data-view="grid" title="海报墙" aria-label="海报墙">${icon('library')}</button>
               <button class="${state.view === 'list' ? 'is-active' : ''}" type="button" data-view="list" title="列表" aria-label="列表">${icon('list')}</button>
             </div>
+            <button class="btn btn-ghost" type="button" data-add-series>${icon('plus')}添加番剧</button>
             ${selectMenuMarkup('sort', {
               label: '排序',
               value: state.sort,
@@ -1426,7 +1440,7 @@ function renderSettings() {
                 <span class="settings-tab-icon">${icon(tab.icon)}</span><span>${tab.label}</span>
               </button>`
             ).join('')}
-            <div class="settings-version">本地番剧媒体库 · v0.2.0</div>
+            <div class="settings-version">本地番剧媒体库 · v0.2.1</div>
           </aside>
 
           <div class="settings-body" id="settingsBody"></div>
@@ -1753,7 +1767,7 @@ function advancedPanel() {
       </section>
       <section class="setting-group">
         <div class="setting-label">关于</div>
-        <p class="setting-hint">本地番剧媒体库 v0.2.0 · 只读扫描 · 数据保存在本机。</p>
+        <p class="setting-hint">本地番剧媒体库 v0.2.1 · 只读扫描 · 数据保存在本机。</p>
       </section>
     </div>`;
 }
@@ -2163,7 +2177,9 @@ function renderDetail() {
 
       <div class="detail-body detail-body--rich">
         <aside class="detail-aside">
-          <div class="detail-cover">${coverMarkup(series, 'detail-img')}</div>
+          <div class="detail-cover">${coverMarkup(series, 'detail-img')}${
+            (progress.totalFiles ?? 0) === 0 ? '<span class="poster-undownloaded detail-undownloaded">未下载</span>' : ''
+          }</div>
           <h2 class="detail-title">${esc(series.title_cn ?? '未命名')}</h2>
           ${series.title_orig ? `<div class="detail-orig">${esc(series.title_orig)}</div>` : ''}
 
@@ -2825,6 +2841,186 @@ function openOverlay(html, options = {}) {
   document.documentElement.classList.add('has-overlay');
 }
 
+function addSeriesMarkup() {
+  const isDesktop = Boolean(window.desktopWindow?.pickFolder);
+  const folder = addSeries.tab === 'folder'
+    ? `<section class="add-section">
+        <p class="add-desc">选择硬盘上已有的番剧文件夹。程序会扫描其中的视频、匹配 Bangumi，并把它加入媒体库；不会移动或重命名文件。</p>
+        <div class="add-folder-row">
+          <input id="addFolderPath" class="text-input" type="text" spellcheck="false"
+            placeholder="例如：E:/Videos/Anime/某部番剧" value="${esc(addSeries.folder)}" />
+          ${isDesktop ? `<button class="btn btn-ghost" type="button" data-add-action="pick-folder">浏览…</button>` : ''}
+        </div>
+        <div class="add-actions">
+          <button class="btn btn-primary" type="button" data-add-action="add-folder"${addSeries.adding === 'folder' ? ' disabled' : ''}>
+            ${addSeries.adding === 'folder' ? '正在扫描…' : '添加文件夹'}
+          </button>
+        </div>
+        <p class="add-hint">文件夹可以不在已配置的扫描目录里；添加后会一直保留。</p>
+        ${addSeries.error ? `<p class="add-error">${esc(addSeries.error)}</p>` : ''}
+      </section>`
+    : `<section class="add-section">
+        <p class="add-desc">搜索 Bangumi，把看过但本地没有的番剧加进来作为占位。封面会标记「未下载」，仍然可以查看简介、评分、角色和剧集信息。</p>
+        <div class="add-search-row">
+          <input id="addSubjectQuery" class="text-input" type="search" spellcheck="false"
+            placeholder="输入番剧名，例如 间谍过家家" value="${esc(addSeries.query)}" />
+          <button class="btn btn-ghost" type="button" data-add-action="search-subject"${addSeries.searching ? ' disabled' : ''}>
+            ${addSeries.searching ? '搜索中…' : '搜索'}
+          </button>
+        </div>
+        ${addSeries.error ? `<p class="add-error">${esc(addSeries.error)}</p>` : ''}
+        <div class="add-results">
+          ${
+            addSeries.searching
+              ? `<div class="add-empty"><span class="spinner"></span><span>正在搜索 Bangumi…</span></div>`
+              : addSeries.results.length
+                ? addSeries.results
+                    .map((candidate) => {
+                      const adding = addSeries.adding === candidate.bangumiId;
+                      return `<button class="add-result" type="button" data-add-subject="${candidate.bangumiId}"${adding ? ' disabled' : ''}>
+                        <span class="add-result-cover">${coverMarkup(
+                          { coverUrl: candidate.cover, title_cn: candidate.title },
+                          'add-cover-img'
+                        )}</span>
+                        <span class="add-result-main">
+                          <strong>${esc(candidate.title ?? '未命名')}</strong>
+                          <small>${esc(candidate.original ?? '')}</small>
+                          <small>${[candidate.date ? String(candidate.date).slice(0, 4) : '', candidate.eps ? `${candidate.eps} 集` : '']
+                            .filter(Boolean)
+                            .join(' · ') || '信息待补充'}</small>
+                        </span>
+                        <span class="add-result-action">${adding ? '添加中…' : '添加'}</span>
+                      </button>`;
+                    })
+                    .join('')
+                : addSeries.query
+                  ? '<div class="add-empty">没有找到匹配的条目，换个关键词试试。</div>'
+                  : '<div class="add-empty">输入番剧名后搜索 Bangumi。</div>'
+          }
+        </div>
+      </section>`;
+
+  return `
+    <div class="add-series">
+      <header class="add-head">
+        <div>
+          <span class="eyebrow">${icon('plus')}手动添加</span>
+          <h2>添加到媒体库</h2>
+        </div>
+        <button class="round-btn" type="button" data-action="close" title="关闭（Esc）" aria-label="关闭">${icon('close')}</button>
+      </header>
+      <div class="add-tabs" role="tablist">
+        <button class="add-tab${addSeries.tab === 'folder' ? ' is-active' : ''}" type="button" role="tab"
+          aria-selected="${addSeries.tab === 'folder'}" data-add-tab="folder">本地文件夹</button>
+        <button class="add-tab${addSeries.tab === 'subject' ? ' is-active' : ''}" type="button" role="tab"
+          aria-selected="${addSeries.tab === 'subject'}" data-add-tab="subject">未下载番剧</button>
+      </div>
+      ${folder}
+    </div>`;
+}
+
+function openAddSeries() {
+  Object.assign(addSeries, {
+    tab: 'folder',
+    folder: '',
+    query: '',
+    results: [],
+    searching: false,
+    adding: null,
+    error: '',
+  });
+  openOverlay(addSeriesMarkup(), { narrow: true });
+}
+
+function renderAddSeries() {
+  if (!overlayPanel.querySelector('.add-series')) return;
+  overlayPanel.innerHTML = addSeriesMarkup();
+}
+
+async function pickAddFolder() {
+  if (!window.desktopWindow?.pickFolder) return;
+  try {
+    const folder = await window.desktopWindow.pickFolder();
+    if (folder) {
+      addSeries.folder = folder;
+      renderAddSeries();
+    }
+  } catch (error) {
+    addSeries.error = `无法打开文件夹选择器：${error.message}`;
+    renderAddSeries();
+  }
+}
+
+async function addFolderToLibrary() {
+  const input = $('addFolderPath');
+  const folder = String(input?.value ?? addSeries.folder).trim();
+  addSeries.folder = folder;
+  if (!folder) {
+    addSeries.error = '请选择一个文件夹';
+    renderAddSeries();
+    return;
+  }
+  addSeries.adding = 'folder';
+  addSeries.error = '';
+  renderAddSeries();
+  try {
+    const result = await api('/api/library/add-folder', { method: 'POST', body: { folder } });
+    toast(result.added ? `已添加 ${result.added} 部番剧` : '这个文件夹已经在媒体库中');
+    await loadData({ quiet: true });
+    const first = result.series?.[0];
+    if (first?.id) openDetail(first.id);
+    else closeOverlay();
+  } catch (error) {
+    addSeries.adding = null;
+    addSeries.error = error.message;
+    renderAddSeries();
+  }
+}
+
+async function searchAddSubjects() {
+  const input = $('addSubjectQuery');
+  const query = String(input?.value ?? addSeries.query).trim();
+  addSeries.query = query;
+  addSeries.error = '';
+  if (!query) {
+    addSeries.results = [];
+    renderAddSeries();
+    return;
+  }
+  addSeries.searching = true;
+  renderAddSeries();
+  try {
+    const result = await api(`/api/search?q=${encodeURIComponent(query)}`);
+    addSeries.results = result.candidates ?? [];
+  } catch (error) {
+    addSeries.error = `搜索失败：${error.message}`;
+    addSeries.results = [];
+  } finally {
+    addSeries.searching = false;
+    renderAddSeries();
+    const field = $('addSubjectQuery');
+    field?.focus();
+    field?.setSelectionRange?.(field.value.length, field.value.length);
+  }
+}
+
+async function addSubjectPlaceholder(bangumiId) {
+  addSeries.adding = bangumiId;
+  addSeries.error = '';
+  renderAddSeries();
+  try {
+    const result = await api('/api/library/add-subject', { method: 'POST', body: { bangumiId } });
+    toast(result.added ? `已添加「${result.series?.title_cn ?? '番剧'}」` : '这部番剧已经在媒体库中');
+    await loadData({ quiet: true });
+    if (result.series?.id) openDetail(result.series.id);
+    else closeOverlay();
+  } catch (error) {
+    addSeries.adding = null;
+    addSeries.error = error.message;
+    renderAddSeries();
+  }
+}
+
 function closeDetailMenu() {
   const menu = $('detailMenu');
   if (!menu) return;
@@ -2913,6 +3109,30 @@ document.addEventListener('click', async (event) => {
     closeSelectMenus();
     renderLibrary();
     return undefined;
+  }
+
+  if (target.closest('[data-add-series]')) {
+    openAddSeries();
+    return undefined;
+  }
+
+  const addTab = target.closest('[data-add-tab]');
+  if (addTab) {
+    addSeries.tab = addTab.dataset.addTab === 'subject' ? 'subject' : 'folder';
+    addSeries.error = '';
+    renderAddSeries();
+    return undefined;
+  }
+
+  const addAction = target.closest('[data-add-action]')?.dataset.addAction;
+  if (addAction === 'pick-folder') return pickAddFolder();
+  if (addAction === 'add-folder') return addFolderToLibrary();
+  if (addAction === 'search-subject') return searchAddSubjects();
+
+  const addSubject = target.closest('[data-add-subject]');
+  if (addSubject) {
+    event.preventDefault();
+    return addSubjectPlaceholder(Number(addSubject.dataset.addSubject));
   }
   if (!target.closest('.head-more')) closeDetailMenu();
   else if (target.closest('.action-menu-item') && !target.closest('[data-action]')) closeDetailMenu();
@@ -3261,6 +3481,11 @@ document.addEventListener('click', async (event) => {
 });
 
 document.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && document.activeElement?.id === 'addSubjectQuery') {
+    event.preventDefault();
+    searchAddSubjects();
+    return;
+  }
   if (event.key === 'Escape' && document.querySelector('.select-menu.is-open')) {
     closeSelectMenus();
     return;

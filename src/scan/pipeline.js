@@ -125,6 +125,39 @@ async function persistGroup({ db, group, outcome, config, client, existing, cove
 }
 
 /**
+ * Adds one folder selected by the user. Unlike a normal scan this folder does
+ * not have to live under a configured scan root, and the resulting series is
+ * marked manual so the next scan cannot delete it just because it is outside
+ * those roots.
+ */
+export async function addLocalFolder({ db, config, client, coversDir, folder, logger = console }) {
+  const result = await walkVideos(folder, { ignoreDirNames: config.scan.ignoreDirNames });
+  const groups = groupFiles(result.files, { rootName: path.basename(folder), root: folder });
+  const series = [];
+  for (const group of groups) {
+    const existing = repo.findSeriesByLocalKey(db, localKeyFor(group));
+    let outcome = null;
+    if (!existing || existing.match_state === 'unmatched') {
+      outcome = await findMatches(client, group, {
+        threshold: config.metadata.matchThreshold,
+        margin: config.metadata.matchMargin,
+      });
+    }
+    const saved = await persistGroup({ db, group, outcome, config, client, existing, coversDir });
+    repo.updateSeries(db, saved.seriesId, { manual: 1 });
+    series.push({ id: saved.seriesId, created: !existing });
+  }
+  logger?.log?.(`手动添加文件夹: ${folder} → ${series.length} 部`);
+  return {
+    files: result.files.length,
+    groups: groups.length,
+    created: series.filter((item) => item.created).length,
+    series,
+    errors: result.errors,
+  };
+}
+
+/**
  * @returns {Promise<object>} A summary of the run.
  */
 export async function runScan({ db, config, client, coversDir, onProgress = () => {} }) {
@@ -150,7 +183,7 @@ export async function runScan({ db, config, client, coversDir, onProgress = () =
   // Drop groups that vanished from disk (their folder no longer has any video).
   const liveKeys = new Set(allGroups.map((group) => localKeyFor(group)));
   for (const series of repo.listSeries(db)) {
-    if (series.local_key && !liveKeys.has(series.local_key)) {
+    if (series.local_key && !liveKeys.has(series.local_key) && !series.manual) {
       repo.deleteSeries(db, series.id);
     }
   }

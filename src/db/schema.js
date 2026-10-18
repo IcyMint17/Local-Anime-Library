@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS series (
   ep_offset_auto INTEGER DEFAULT 1,
   match_state   TEXT,
   match_score   REAL,
+  manual        INTEGER DEFAULT 0,
   created_at    TEXT,
   updated_at    TEXT
 );
@@ -118,6 +119,7 @@ export function migrate(db) {
   ensureColumn(db, 'series', 'ep_offset', 'INTEGER DEFAULT 0');
   ensureColumn(db, 'series', 'ep_offset_auto', 'INTEGER DEFAULT 1');
   ensureColumn(db, 'series', 'favorite', 'INTEGER DEFAULT 0');
+  ensureColumn(db, 'series', 'manual', 'INTEGER DEFAULT 0');
   rebuildEpisodesIfStale(db);
 }
 

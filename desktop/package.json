@@ -1,7 +1,7 @@
 {
   "name": "anime-library-desktop",
   "productName": "AnimeLibrary",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "本地番剧媒体库 — 桌面版外壳",
   "type": "module",
@@ -10,7 +10,7 @@
     "start": "electron .",
     "make-icon": "electron make-icon.mjs",
     "stage": "node stage.mjs",
-    "pack": "node stage.mjs && electron-packager staging AnimeLibrary --platform=win32 --arch=x64 --out=dist --overwrite --asar --icon=icon.ico --app-version=0.2.0 --app-copyright=\"本地番剧媒体库\" --win32metadata.CompanyName=\"本地番剧媒体库\" --win32metadata.FileDescription=\"本地番剧媒体库\"",
+    "pack": "node stage.mjs && electron-packager staging AnimeLibrary --platform=win32 --arch=x64 --out=dist --overwrite --asar --icon=icon.ico --app-version=0.2.1 --app-copyright=\"本地番剧媒体库\" --win32metadata.CompanyName=\"本地番剧媒体库\" --win32metadata.FileDescription=\"本地番剧媒体库\"",
     "installer": "npm run pack && electron-builder --prepackaged dist/AnimeLibrary-win32-x64 --win nsis"
   },
   "devDependencies": {

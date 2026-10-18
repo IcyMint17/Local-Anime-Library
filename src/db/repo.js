@@ -32,14 +32,21 @@ export function listSeries(db) {
   return db.prepare('SELECT * FROM series ORDER BY title_cn COLLATE NOCASE, source_folder COLLATE NOCASE').all();
 }
 
+/** Finds the series already bound to a Bangumi subject, if any. */
+export function findSeriesByBangumiId(db, bangumiId) {
+  return db
+    .prepare('SELECT * FROM series WHERE bangumi_id = ? ORDER BY manual ASC, id LIMIT 1')
+    .get(Number(bangumiId));
+}
+
 export function insertSeries(db, row) {
   const timestamp = now();
   const info = db
     .prepare(
       `INSERT INTO series (local_key, source_folder, bangumi_id, title_cn, title_orig, title_jp,
          summary, air_date, eps_total, cover_url, cover_path, rating, rating_count,
-         media_kind, season, match_state, match_score, created_at, updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+         media_kind, season, match_state, match_score, manual, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
     )
     .run(
       row.local_key ?? null,
@@ -59,6 +66,7 @@ export function insertSeries(db, row) {
       row.season ?? null,
       row.match_state ?? 'unmatched',
       row.match_score ?? null,
+      row.manual ? 1 : 0,
       timestamp,
       timestamp
     );

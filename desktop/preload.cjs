@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('desktopWindow', {
   toggleMaximize: () => ipcRenderer.send('window:toggle-maximize'),
   close: () => ipcRenderer.send('window:close'),
   openMenu: () => ipcRenderer.send('window:menu'),
+  pickFolder: () => ipcRenderer.invoke('folder:pick'),
   getState: () => ipcRenderer.invoke('window:get-state'),
   cacheInfo: () => ipcRenderer.invoke('cache:info'),
   gpuInfo: () => ipcRenderer.invoke('gpu:info'),

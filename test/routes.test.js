@@ -698,3 +698,83 @@ test('detail extras: rating distribution, characters, staff and comments are exp
 
   await harness.close();
 });
+
+
+test('manual add: a Bangumi-only placeholder has no files but keeps episode metadata', async () => {
+  const subject = {
+    id: 910001,
+    name_cn: '未下载测试番剧',
+    name: 'Undownloaded Test',
+    eps: 2,
+    date: '2026-01-01',
+    summary: '占位条目',
+    images: {},
+    rating: { score: 7.4, total: 12 },
+  };
+  const episodes = [
+    { number: 1, sort: 1, ep: 1, type: 0, title: '第一集', title_cn: '第一集', air_date: '2026-01-01' },
+    { number: 2, sort: 2, ep: 2, type: 0, title: '第二集', title_cn: '第二集', air_date: '2026-01-08' },
+  ];
+  const harness = await startHarness({ client: fakeClient({ subject, episodes }) });
+
+  const response = await fetch(`${harness.base}/api/library/add-subject`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bangumiId: 910001 }),
+  });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.added, true);
+  assert.equal(body.series.manual, 1);
+  assert.equal(body.series.progress.totalFiles, 0);
+  assert.equal(body.series.progress.total, 2);
+
+  const detail = await (await fetch(`${harness.base}/api/series/${body.series.id}`)).json();
+  assert.equal(detail.counts.files, 0);
+  assert.equal(detail.episodes.length, 0);
+  assert.equal(detail.missing.length, 2);
+
+  const again = await fetch(`${harness.base}/api/library/add-subject`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bangumiId: 910001 }),
+  });
+  assert.equal(again.status, 200);
+  assert.equal((await again.json()).added, false);
+});
+
+test('manual add: an existing folder outside scan roots is added and protected', async () => {
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'anime-manual-folder-'));
+  fs.writeFileSync(path.join(folder, '01.mkv'), 'fake');
+  const client = {
+    ...fakeClient({ subject: { id: 1, name_cn: 'x' }, episodes: [] }),
+    async searchSubjects() {
+      return [];
+    },
+  };
+  const harness = await startHarness({ client });
+
+  const response = await fetch(`${harness.base}/api/library/add-folder`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ folder }),
+  });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.added, 1);
+  assert.equal(body.series.length, 1);
+  assert.equal(body.series[0].manual, 1);
+  assert.equal(body.series[0].progress.totalFiles, 1);
+
+  // A normal scan with no configured roots must not delete a manual folder.
+  const { runScan } = await import('../src/scan/pipeline.js');
+  await runScan({
+    db: harness.db,
+    config: { ...DEFAULT_CONFIG, scan: { ...DEFAULT_CONFIG.scan, dirs: [] }, coversDir: path.join(harness.dir, 'covers') },
+    client,
+    coversDir: path.join(harness.dir, 'covers'),
+    onProgress: () => {},
+  });
+  const library = await (await fetch(`${harness.base}/api/library`)).json();
+  assert.ok(library.items.some((item) => item.id === body.series[0].id));
+});
